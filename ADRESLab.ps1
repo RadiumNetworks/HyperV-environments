@@ -391,7 +391,14 @@ certutil –crl
 
 Install-WindowsFeature ADCS-Cert-Authority
 
-Install-AdcsCertificationAuthority `-CACommonName COBASEC01 `-CAType EnterpriseRootCA `-CryptoProviderName "RSA#Microsoft Software Key Storage Provider" `-HashAlgorithmName SHA512 `-KeyLength 4096 `-ValidityPeriod Years `-ValidityPeriodUnits 5 
+Install-AdcsCertificationAuthority `
+-CACommonName COBASEC01 `
+-CAType EnterpriseRootCA `
+-CryptoProviderName "RSA#Microsoft Software Key Storage Provider" `
+-HashAlgorithmName SHA512 `
+-KeyLength 4096 `
+-ValidityPeriod Years `
+-ValidityPeriodUnits 5 
 '@
         }
         )
@@ -469,10 +476,11 @@ $LABConfig.Keys | ForEach-Object {
             {
                 $ScriptFileName = ("{0}:\{1}\{2}" -f $_.DriveLetter,$Script.Path,$Script.Name)
                 New-Item -Path ("{0}:\{1}" -f $_.DriveLetter,$Script.Path) -Name $Script.Name -ItemType File -Force
-                Set-Content -Path $ScriptFileName -Value $VMConfig.InstallScript.Content -Force
+                Set-Content -Path $ScriptFileName -Value $Script.Content -Force
             }
         }
     }
     Dismount-VHD -DiskNumber $VMDisk.DiskNumber
 }
+
 
