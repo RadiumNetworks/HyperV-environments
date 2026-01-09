@@ -329,7 +329,7 @@ New-Item -Path C:\PKI\ -ItemType Directory
     ChangeAccess = "$NBChildDomain\Domain Admins","$NBChildDomain\Cert Publishers"
 }
 New-SmbShare @Parameters
-Grant-SmbShareAccess -Name "Backup" -AccountName "Everyone" -AccessRight Read
+Grant-SmbShareAccess -Name "PKI" -AccountName "Everyone" -AccessRight Read
 
 New-Website -Name "PKI" -Port 80 -HostHeader ("$ChildDomain") -PhysicalPath "C:\PKI"
 "@
@@ -572,7 +572,8 @@ Install-WindowsFeature ADCS-Cert-Authority,RSAT-ADDS-Tools
 Copy-Item -Path C:\install\capolicy.inf -Destination c:\Windows\capolicy.inf
 
 Install-AdcsCertificationAuthority `
--CACommonName SECURECA01 `-CAType EnterpriseRootCA `
+-CACommonName SECURECA01 `
+-CAType EnterpriseRootCA `
 -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" `
 -HashAlgorithmName SHA512 `
 -KeyLength 4096 `
@@ -721,4 +722,5 @@ $LABConfig.Keys | ForEach-Object {
     }
     Dismount-VHD -DiskNumber $VMDisk.DiskNumber
 }
+
 
