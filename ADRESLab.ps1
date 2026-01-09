@@ -1,4 +1,37 @@
-﻿$LABConfig = @{
+﻿$RootDomain = "ice.corp.com"
+$NBRootDomain = "ice"
+$ChildDomain = "hq.ice.corp.com"
+$NBChildDomain = "hq"
+
+$LABConfig = @{
+"DNS01"=@{
+    BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
+    Memory=2GB;
+    Switch="Intern";
+    Path="C:\HyperV\ADRES";
+    CPU=2;
+    UnattendFile="C:\HyperV\ADRES\2016\unattend.xml";
+    InstallScript=@{
+            Path="Install";
+            Name="Setup.ps1";
+            Content=@"
+Add-WindowsFeature DNS -IncludeManagementTools
+
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.253 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
+
+Add-DnsServerPrimaryZone -Name "." -ZoneFile "root.dns"
+Add-DnsServerPrimaryZone -Name $RootDomain -ZoneFile $RootDomain.dns -DynamicUpdate NonsecureAndSecure
+Add-DnsServerResourceRecord -ZoneName $RootDomain -IPv4Address 10.0.0.1 -A -Name .
+Add-DnsServerPrimaryZone -Name $ChildDomain -ZoneFile $ChildDomain.dns -DynamicUpdate NonsecureAndSecure
+Add-DnsServerResourceRecord -ZoneName $ChildDomain -IPv4Address 10.0.0.11 -A -Name .
+Add-DnsServerResourceRecord -ZoneName $ChildDomain -IPv4Address 10.0.0.21 -A -Name pki
+
+"@
+
+        }
+    };
 "ROOTDC01"=@{
     BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
     Memory=2GB;
@@ -9,89 +42,118 @@
     InstallScript=@{
             Path="Install";
             Name="Setup.ps1";
-            Content=@'
-$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}
-New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.1 -PrefixLength 24 -DefaultGateway 10.0.0.254
-Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")
+            Content=@"
+Write-Host "This will install the first Domain Controller for the domain $Rootdomain"
+Read-Host -Prompt "Press Enter to continue only after the DNS Server is configured."
+`$Cred = Get-Credential -Message "Please enter the password" -UserName $NBRootDomain\Administrator 
+
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.1 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
 
 Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
 
-Install-ADDSForest `
--CreateDnSDelegation:$false `
--DatabasePath "C:\Windows\NTDS" `
--DomainMode "WinThreshold" `
--DomainName "ice.corp.com" `
--DomainNetbiosName "ice" `
--ForestMode "WinThreshold" `
--InstallDns:$false `
--LogPath "C:\Windows\NTDS" `
--NoRebootOnCompletion:$false `
--SysvolPath "C:\Windows\SYSVOL" `
--Force:$true
-'@
+Install-ADDSForest ``
+-CreateDnSDelegation:`$false ``
+-DatabasePath "C:\Windows\NTDS" ``
+-DomainMode "WinThreshold" ``
+-DomainName $RootDomain ``
+-DomainNetbiosName $NBRootDomain ``
+-ForestMode "WinThreshold" ``
+-InstallDns:`$false ``
+-LogPath "C:\Windows\NTDS" ``
+-NoRebootOnCompletion:`$false ``
+-SysvolPath "C:\Windows\SYSVOL" ``
+-Force:`$true ``
+-SafeModeAdministratorPassword `$Cred.Password
+"@
         };
-    AdditionalScripts=@(@{
+    AdditionalScripts=@(
+    @{
             Path="Install";
             Name="CreateBackupSchedule.ps1";
-            Content=@'
+            Content=@"
 Install-WindowsFeature Windows-Server-Backup -IncludeAllSubFeature -IncludeManagementTools
 
-$Policy = New-WBPolicy
-Add-WBSystemState -Policy $Policy
-Add-WBBareMetalRecovery -Policy $Policy
-Set-WBVssBackupOptions -Policy $Policy -VssCopyBackup
-$Backuplocation = New-WBBackupTarget -NetworkPath "\\DATA01\Backup"
-Add-WBBackupTarget -Policy $Policy -Target $Backuplocation
-Set-WBSchedule -Policy $Policy -Schedule 01:00
-Start-WBBackup -Policy $policy
-'@
-        })
+`$Policy = New-WBPolicy
+Add-WBSystemState -Policy `$Policy
+Add-WBBareMetalRecovery -Policy `$Policy
+Set-WBVssBackupOptions -Policy `$Policy -VssCopyBackup
+`$Backuplocation = New-WBBackupTarget -NetworkPath "\\DATA01\Backup"
+Add-WBBackupTarget -Policy `$Policy -Target `$Backuplocation
+Set-WBSchedule -Policy `$Policy -Schedule 01:00
+Start-WBBackup -Policy `$policy
+"@
+        },@{
+            Path="Install";
+            Name="CreateNewAdmin.ps1";
+            Content=@"
+`$Cred = Get-Credential -Message "Please enter the password for the new admin account" -UserName Admin
+New-ADUser -Name Admin -AccountPassword `$Cred.Password -UserPrincipalName Admin@$NBChildDomain -DisplayName Admin -Description "MasterOfDisaster" -Server $ChildDomain -Enabled $true
+`$User = Get-ADUser -Identity Admin -Server $ChildDomain
+Start-Sleep -Seconds 30
+`$Group = Get-ADGroup -Identity "Enterprise Admins"
+Add-ADGroupMember -Identity `$Group -Members `$User
+`$Group = Get-ADGroup -Identity "Administrators"
+Add-ADGroupMember -Identity `$Group -Members `$User
+`$Group = Get-ADGroup -Identity "Domain Admins" -Server $ChildDomain
+Add-ADGroupMember -Identity `$Group -Members `$User
+"@
+        }
+        )
     };
 "ROOTDC02"=@{
     BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
-    Memory=2GB;Switch="Intern";
+    Memory=2GB;
+    Switch="Intern";
     Path="C:\HyperV\ADRES";
     CPU=2;
     UnattendFile="C:\HyperV\ADRES\2016\unattend.xml";
     InstallScript=@{
             Path="Install";
             Name="Setup.ps1";
-            Content=@'
-$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}
-New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.2 -PrefixLength 24 -DefaultGateway 10.0.0.254
-Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")
+            Content=@"
+Write-Host "This will install the second Domain Controller for the domain $Rootdomain"
+Read-Host -Prompt "Press Enter to continue only after the DNS Server and ROOTDC01 are configured."
+`$Cred = Get-Credential -Message "Please enter the password" -UserName $NBRootDomain\Administrator 
+
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.2 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
 
 Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
 
-Install-ADDSDomainController `
--Credential (Get-Credential ice\Administrator) `
--CreateDnSDelegation:$false `
--DomainName ice.corp.com `
--InstallDns:$false `
--DatabasePath "C:\Windows\NTDS" `
--SYSVOLPath "C:\Windows\SYSVOL" `
--LogPath "C:\Windows\NTDS" `
--NoRebootOnCompletion:$false `
--Force:$true
-'@
-
+Install-ADDSDomainController ``
+-Credential `$Cred ``
+-CreateDnSDelegation:`$false ``
+-DomainName $RootDomain ``
+-InstallDns:`$false ``
+-DatabasePath "C:\Windows\NTDS" ``
+-SYSVOLPath "C:\Windows\SYSVOL" ``
+-LogPath "C:\Windows\NTDS" ``
+-NoRebootOnCompletion:`$false ``
+-Force:`$true ``
+-SafeModeAdministratorPassword `$Cred.Password
+"@
         };
-    AdditionalScripts=@(@{
+    AdditionalScripts=@(
+    @{
             Path="Install";
             Name="CreateBackupSchedule.ps1";
-            Content=@'
+            Content=@"
 Install-WindowsFeature Windows-Server-Backup -IncludeAllSubFeature -IncludeManagementTools
 
-$Policy = New-WBPolicy
-Add-WBSystemState -Policy $Policy
-Add-WBBareMetalRecovery -Policy $Policy
-Set-WBVssBackupOptions -Policy $Policy -VssCopyBackup
-$Backuplocation = New-WBBackupTarget -NetworkPath "\\DATA01\Backup"
-Add-WBBackupTarget -Policy $Policy -Target $Backuplocation
-Set-WBSchedule -Policy $Policy -Schedule 01:00
-Start-WBBackup -Policy $policy
-'@
-        })
+`$Policy = New-WBPolicy
+Add-WBSystemState -Policy `$Policy
+Add-WBBareMetalRecovery -Policy `$Policy
+Set-WBVssBackupOptions -Policy `$Policy -VssCopyBackup
+`$Backuplocation = New-WBBackupTarget -NetworkPath "\\DATA01\Backup"
+Add-WBBackupTarget -Policy `$Policy -Target `$Backuplocation
+Set-WBSchedule -Policy `$Policy -Schedule 01:00
+Start-WBBackup -Policy `$policy
+"@
+        }
+        )
     };
 "CHILDDC01"=@{
     BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
@@ -103,46 +165,52 @@ Start-WBBackup -Policy $policy
     InstallScript=@{
             Path="Install";
             Name="Setup.ps1";
-            Content=@'
-$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}
-New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.11 -PrefixLength 24 -DefaultGateway 10.0.0.254
-Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")
+            Content=@"
+Write-Host "This will install the first Domain Controller for the domain $ChildDomain"
+Read-Host -Prompt "Press Enter to continue only after the DNS Server and ROOTDC01 are configured."
+`$Cred = Get-Credential -Message "Please enter the password" -UserName $NBRootDomain\Administrator 
+
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.11 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
 
 Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
 
-$params = @{
-    Credential = (Get-Credential ice\Administrator)
-    NewDomainName = "hq"
-    ParentDomainName = "ice.corp.com"
-    InstallDNS = $false
-    CreateDNSDelegation = $false
+`$params = @{
+    Credential = `$Cred
+    NewDomainName = "$NBChildDomain"
+    ParentDomainName = "$RootDomain"
+    InstallDNS = `$false
+    CreateDNSDelegation = `$false
     DomainMode = "WinThreshold" 
     DatabasePath = "C:\Windows\NTDS"
     SYSVOLPath = "C:\Windows\SYSVOL"
     LogPath = "C:\Windows\NTDS"
-    NoRebootOnCompletion = $false
-    Force = $true
+    NoRebootOnCompletion = `$false
+    Force = `$true
+    SafeModeAdministratorPassword = `$Cred.Password
 }
 Install-ADDSDomain @params
-'@
-
+"@
         };
-    AdditionalScripts=@(@{
+    AdditionalScripts=@(
+    @{
             Path="Install";
             Name="CreateBackupSchedule.ps1";
-            Content=@'
+            Content=@"
 Install-WindowsFeature Windows-Server-Backup -IncludeAllSubFeature -IncludeManagementTools
 
-$Policy = New-WBPolicy
-Add-WBSystemState -Policy $Policy
-Add-WBBareMetalRecovery -Policy $Policy
-Set-WBVssBackupOptions -Policy $Policy -VssCopyBackup
-$Backuplocation = New-WBBackupTarget -NetworkPath "\\DATA01\Backup"
-Add-WBBackupTarget -Policy $Policy -Target $Backuplocation
-Set-WBSchedule -Policy $Policy -Schedule 01:00
-Start-WBBackup -Policy $policy
-'@
-        })
+`$Policy = New-WBPolicy
+Add-WBSystemState -Policy `$Policy
+Add-WBBareMetalRecovery -Policy `$Policy
+Set-WBVssBackupOptions -Policy `$Policy -VssCopyBackup
+`$Backuplocation = New-WBBackupTarget -NetworkPath "\\DATA01\Backup"
+Add-WBBackupTarget -Policy `$Policy -Target `$Backuplocation
+Set-WBSchedule -Policy `$Policy -Schedule 01:00
+Start-WBBackup -Policy `$policy
+"@
+        }
+        )
     };
 "CHILDDC02"=@{
     BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
@@ -154,70 +222,48 @@ Start-WBBackup -Policy $policy
     InstallScript=@{
             Path="Install";
             Name="Setup.ps1";
-            Content=@'
-$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}
-New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.12 -PrefixLength 24 -DefaultGateway 10.0.0.254
-Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")
+            Content=@"
+Write-Host "This will install the second Domain Controller for the domain $ChildDomain"
+Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and CHILDDC01 are configured."
+`$Cred = Get-Credential -Message "Please enter the password" -UserName $NBChildDomain\Administrator 
+
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.12 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
 
 Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
 
-Install-ADDSDomainController `
--Credential (Get-Credential hq\Administrator) `
--CreateDnSDelegation:$false `
--DomainName hq.ice.corp.com `
--InstallDns:$false `
--DatabasePath "C:\Windows\NTDS" `
--SYSVOLPath "C:\Windows\SYSVOL" `
--LogPath "C:\Windows\NTDS" `
--NoRebootOnCompletion:$false `
--Force:$true
-'@
-
+Install-ADDSDomainController ``
+-Credential `$Cred ``
+-CreateDnSDelegation:`$false ``
+-DomainName $ChildDomain ``
+-InstallDns:`$false ``
+-DatabasePath "C:\Windows\NTDS" ``
+-SYSVOLPath "C:\Windows\SYSVOL" ``
+-LogPath "C:\Windows\NTDS" ``
+-NoRebootOnCompletion:`$false ``
+-Force:`$true ``
+-SafeModeAdministratorPassword `$Cred.Password
+"@
         };
-    AdditionalScripts=@(@{
+    AdditionalScripts=@(
+    @{
             Path="Install";
             Name="CreateBackupSchedule.ps1";
-            Content=@'
+            Content=@"
 Install-WindowsFeature Windows-Server-Backup -IncludeAllSubFeature -IncludeManagementTools
 
-$Policy = New-WBPolicy
-Add-WBSystemState -Policy $Policy
-Add-WBBareMetalRecovery -Policy $Policy
-Set-WBVssBackupOptions -Policy $Policy -VssCopyBackup
-$Backuplocation = New-WBBackupTarget -NetworkPath "\\DATA01\Backup"
-Add-WBBackupTarget -Policy $Policy -Target $Backuplocation
-Set-WBSchedule -Policy $Policy -Schedule 01:00
-Start-WBBackup -Policy $policy
-'@
-        })
-    };
-"DNS01"=@{
-    BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
-    Memory=2GB;
-    Switch="Intern";
-    Path="C:\HyperV\ADRES";
-    CPU=2;
-    UnattendFile="C:\HyperV\ADRES\2016\unattend.xml";
-    InstallScript=@{
-            Path="Install";
-            Name="Setup.ps1";
-            Content=@'
-Add-WindowsFeature DNS -IncludeManagementTools
-
-$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}
-New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.253 -PrefixLength 24 -DefaultGateway 10.0.0.254
-Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")
-
-Add-DnsServerPrimaryZone -Name "." -ZoneFile "root.dns"
-Add-DnsServerPrimaryZone -Name "ice.corp.com" -ZoneFile "ice.corp.com.dns" -DynamicUpdate NonsecureAndSecure
-Add-DnsServerResourceRecord -ZoneName ice.corp.com -IPv4Address 10.0.0.1 -A -Name .
-Add-DnsServerPrimaryZone -Name "hq.ice.corp.com" -ZoneFile "hq.ice.corp.com.dns" -DynamicUpdate NonsecureAndSecure
-Add-DnsServerResourceRecord -ZoneName hq.ice.corp.com -IPv4Address 10.0.0.11 -A -Name .
-Add-DnsServerResourceRecord -ZoneName hq.ice.corp.com -IPv4Address 10.0.0.21 -A -Name pki
-
-'@
-
+`$Policy = New-WBPolicy
+Add-WBSystemState -Policy `$Policy
+Add-WBBareMetalRecovery -Policy `$Policy
+Set-WBVssBackupOptions -Policy `$Policy -VssCopyBackup
+`$Backuplocation = New-WBBackupTarget -NetworkPath "\\DATA01\Backup"
+Add-WBBackupTarget -Policy `$Policy -Target `$Backuplocation
+Set-WBSchedule -Policy `$Policy -Schedule 01:00
+Start-WBBackup -Policy `$policy
+"@
         }
+        )
     };
 "DATA01"=@{
     BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
@@ -229,48 +275,57 @@ Add-DnsServerResourceRecord -ZoneName hq.ice.corp.com -IPv4Address 10.0.0.21 -A 
     InstallScript=@{
             Path="Install";
             Name="Setup.ps1";
-            Content=@'
-$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}
-New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.21 -PrefixLength 24 -DefaultGateway 10.0.0.254
-Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")
+            Content=@"
+Write-Host "This will install the backup-/webserver in $ChildDomain"
+Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and CHILDDC01 are configured."
+`$Cred = Get-Credential -Message "Please enter the password" -UserName $NBChildDomain\Administrator 
 
-Add-Computer -DomainName hq.ice.corp.com -Restart
-'@
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.21 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
+
+Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
+"@
 
         };
     AdditionalScripts=@(
         @{
             Path="Install";
             Name="CreateBackupShare.ps1";
-            Content=@'
+            Content=@"
 New-Item -Path C:\Backup\ -ItemType Directory
-$Parameters = @{
+`$Parameters = @{
     Name = 'Backup'
     Path = 'C:\Backup'
-    ChangeAccess = 'hq\Domain Admins','hq\Domain Controllers','ice\Domain Admins','ice\Domain Controllers'
+    ChangeAccess = "$NBChildDomain\Domain Admins","$NBChildDomain\Domain Controllers","$NBRootDomain\Domain Admins","$NBRootDomain\Domain Controllers"
 }
 New-SmbShare @Parameters
 Grant-SmbShareAccess -Name "Backup" -AccountName "Everyone" -AccessRight Read
 
-'@
+"@
         }
         @{
             Path="Install";
             Name="CreateHTTPCDP.ps1";
-            Content=@'
+            Content=@"
 Install-WindowsFeature -Name Web-Server -IncludeManagementTools
 
+Install-WindowsFeature Web-Mgmt-Service
+Set-ItemProperty -Path HKLM:\SOFTWARE\Microsoft\WebManagement\Server\ -PSProperty EnableRemoteManagement -Value 1
+Set-Service WMSVC -StartupType Automatic
+Start-Service -Name WMSVC
+
 New-Item -Path C:\PKI\ -ItemType Directory
-$Parameters = @{
+`$Parameters = @{
     Name = 'PKI'
     Path = 'C:\PKI'
-    ChangeAccess = 'hq\Domain Admins','hq\Cert Publishers'
+    ChangeAccess = "$NBChildDomain\Domain Admins","$NBChildDomain\Cert Publishers"
 }
 New-SmbShare @Parameters
 Grant-SmbShareAccess -Name "Backup" -AccountName "Everyone" -AccessRight Read
 
-New-Website -Name "PKI" -Port 80 -HostHeader "pki.ice.corp.com" -PhysicalPath "C:\PKI"
-'@
+New-Website -Name "PKI" -Port 80 -HostHeader ("$ChildDomain") -PhysicalPath "C:\PKI"
+"@
         }
         )
     };
@@ -284,16 +339,20 @@ New-Website -Name "PKI" -Port 80 -HostHeader "pki.ice.corp.com" -PhysicalPath "C
     InstallScript=@{
             Path="Install";
             Name="Setup.ps1";
-            Content=@'
-$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}
-New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.22 -PrefixLength 24 -DefaultGateway 10.0.0.254
-Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")
+            Content=@"
+Write-Host "This will install the management server in $ChildDomain"
+Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and CHILDDC01 are configured."
+`$Cred = Get-Credential -Message "Please enter the password" -UserName $NBChildDomain\Administrator 
+
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.22 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
 
 Install-WindowsFeature -Name RSAT-AD-Tools,GPMC,RSAT-ADCS-Mgmt,RSAT-DNS-Server,Web-Mgmt-Tools
 
-Add-Computer -DomainName hq.ice.corp.com -Restart
+Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
 
-'@
+"@
 
         }
     };
@@ -307,14 +366,18 @@ Add-Computer -DomainName hq.ice.corp.com -Restart
     InstallScript=@{
             Path="Install";
             Name="Setup.ps1";
-            Content=@'
-$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}
-New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.23 -PrefixLength 24 -DefaultGateway 10.0.0.254
-Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")
+            Content=@"
+Write-Host "This will install the entra connect server in $ChildDomain"
+Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and CHILDDC01 are configured."
+`$Cred = Get-Credential -Message "Please enter the password" -UserName $NBChildDomain\Administrator 
 
-Add-Computer -DomainName hq.ice.corp.com -Restart
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.23 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
 
-'@
+Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
+
+"@
 
         }
     };
@@ -328,14 +391,18 @@ Add-Computer -DomainName hq.ice.corp.com -Restart
     InstallScript=@{
             Path="Install";
             Name="Setup.ps1";
-            Content=@'
-$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}
-New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.24 -PrefixLength 24 -DefaultGateway 10.0.0.254
-Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")
+            Content=@"
+Write-Host "This will install the certificate authority in $ChildDomain"
+Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and CHILDDC01 are configured."
+`$Cred = Get-Credential -Message "Please enter the password" -UserName $NBChildDomain\Administrator 
 
-Add-Computer -DomainName hq.ice.corp.com -Restart
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.24 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
 
-'@
+Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
+
+"@
 
         };
     AdditionalScripts=@(
@@ -356,7 +423,7 @@ AlternateSignatureAlgorithm = 0
         @{
             Path="Install";
             Name="ConfigureCertificateAuthority.txt";
-            Content=@'
+            Content=@"
 Certutil -setreg CA\CRLPeriodUnits 2 
 Certutil -setreg CA\CRLPeriod "Weeks" 
 
@@ -374,15 +441,15 @@ Certutil -setreg CA\ValidityPeriod "Years"
 
 Certutil -setreg CA\AuditFilter 127
 
-certutil -setreg CA\CACertPublicationURLs "1:%windir%\system32\CertSrv\CertEnroll\%3%4.crt\n2:http://pki.hq.ice.corp.com/aia/%3%4.crt"
-certutil -setreg CA\CRLPublicationURLs "65:%windir%\system32\CertSrv\CertEnroll\%3%8%9.crl\n6:http://pki.hq.ice.corp.com/crl/%3%8%9.crl\n"
+certutil -setreg CA\CACertPublicationURLs "1:%windir%\system32\CertSrv\CertEnroll\%3%4.crt\n2:http://pki.$ChildDomain/aia/%3%4.crt"
+certutil -setreg CA\CRLPublicationURLs "65:%windir%\system32\CertSrv\CertEnroll\%3%8%9.crl\n6:http://pki.$ChildDomain/crl/%3%8%9.crl\n"
 
 auditpol /set /subcategory:"Certification Services" /success:enable /failure:enable
 
 net stop certsvc && net start certsvc
 certutil –crl
 
-'@
+"@
         },
         @{
             Path="Install";
@@ -391,14 +458,15 @@ certutil –crl
 
 Install-WindowsFeature ADCS-Cert-Authority
 
+Copy-Item -Path C:\install\capolicy.inf -Destination c:\Windows\capolicy.inf
+
 Install-AdcsCertificationAuthority `
--CACommonName COBASEC01 `
--CAType EnterpriseRootCA `
+-CACommonName SECURECA01 `-CAType EnterpriseRootCA `
 -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" `
 -HashAlgorithmName SHA512 `
 -KeyLength 4096 `
 -ValidityPeriod Years `
--ValidityPeriodUnits 5 
+-ValidityPeriodUnits 5
 '@
         }
         )
@@ -482,5 +550,4 @@ $LABConfig.Keys | ForEach-Object {
     }
     Dismount-VHD -DiskNumber $VMDisk.DiskNumber
 }
-
 
