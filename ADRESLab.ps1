@@ -1,4 +1,5 @@
 ﻿$RootDomain = "ice.corp.com"
+$RootDomainDN = "DC=ice,DC=corp,DC=com"
 $NBRootDomain = "ice"
 $ChildDomain = "hq.ice.corp.com"
 $NBChildDomain = "hq"
@@ -95,7 +96,7 @@ Start-WBBackup -Policy `$policy
             Name="CreateNewAdmin.ps1";
             Content=@"
 `$Cred = Get-Credential -Message "Please enter the password for the new admin account" -UserName Admin
-New-ADUser -Name Admin -AccountPassword `$Cred.Password -UserPrincipalName Admin@$NBChildDomain -DisplayName Admin -Description "MasterOfDisaster" -Server $ChildDomain -Enabled $true
+New-ADUser -Name Admin -AccountPassword `$Cred.Password -UserPrincipalName Admin@$NBChildDomain -DisplayName Admin -Description "MasterOfDisaster" -Server $ChildDomain -Enabled `$true
 `$User = Get-ADUser -Identity Admin -Server $ChildDomain
 Start-Sleep -Seconds 30
 `$Group = Get-ADGroup -Identity "Enterprise Admins"
@@ -566,7 +567,7 @@ certutil –crl
             Name="InstallCertificateAuthority.ps1";
             Content=@'
 
-Install-WindowsFeature ADCS-Cert-Authority
+Install-WindowsFeature ADCS-Cert-Authority,RSAT-ADDS-Tools
 
 Copy-Item -Path C:\install\capolicy.inf -Destination c:\Windows\capolicy.inf
 
@@ -583,14 +584,14 @@ Install-AdcsCertificationAuthority `
             Path="Install";
             Name="CreateTemplate.txt";
             Content=@"
-ldifde -i -f C:\Install\kerberosoid.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
-ldifde -i -f C:\Install\kerberos.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
+ldifde -i -f C:\Install\kerberosoid.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
+ldifde -i -f C:\Install\kerberos.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
 
-ldifde -i -f C:\Install\webserveroid.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
-ldifde -i -f C:\Install\webservers.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
+ldifde -i -f C:\Install\webserveroid.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
+ldifde -i -f C:\Install\webserver.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
 
-ldifde -i -f C:\Install\smartcardoid.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
-ldifde -i -f C:\Install\smartcard.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
+ldifde -i -f C:\Install\smartcardoid.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
+ldifde -i -f C:\Install\smartcard.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
 
 "@
         }
