@@ -3,6 +3,12 @@ $NBRootDomain = "ice"
 $ChildDomain = "hq.ice.corp.com"
 $NBChildDomain = "hq"
 
+if(!($HostGuard = Get-HgsGuardian -Name VMGuardian))
+{
+    $HostGuard = New-HgsGuardian -Name 'VMGuardian' -GenerateCertificates
+}
+$KeyProtector = New-HgsKeyProtector -Owner $HostGuard -AllowUntrustedRoot
+
 $LABConfig = @{
 "DNS01"=@{
     BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
@@ -383,6 +389,74 @@ Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
     @{
             Path="Install";
             Name="Windows System Image Manager-x86_en-us.msi";
+            Source="C:\HyperV\ADRES\Files\Tools\Windows System Image Manager-x86_en-us.msi"},
+    @{
+            Path="Install";
+            Name="SSMS-Setup-ENU.exe";
+            Source="C:\HyperV\ADRES\Files\Tools\SSMS-Setup-ENU.exe"}
+    )
+    };
+"CLIENT01"=@{
+    BaseDisc="C:\HyperV\ADRES\11\Base11.vhdx";
+    Memory=4GB;
+    Switch="Intern";
+    Path="C:\HyperV\ADRES";
+    CPU=2;
+    UnattendFile="C:\HyperV\ADRES\11\unattend.xml";
+    InstallScript=@{
+            Path="Install";
+            Name="Setup.ps1";
+            Content=@"
+Write-Host "This will install the client in $ChildDomain"
+Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and CHILDDC01 are configured."
+`$Cred = Get-Credential -Message "Please enter the password" -UserName $NBChildDomain\Administrator 
+
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.31 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
+
+Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
+
+"@
+
+        };
+    AdditionalScripts=@(
+    @{
+            Path="Install";
+            Name="CreateVirtualSmartCard.txt";
+            Content=@"
+tpmvscmgr.exe create /name TestVSC /pin default /adminkey random /generate
+"@
+        }
+        );
+    FilesToCopy=@(
+    @{
+            Path="Install";
+            Name="VSCodeUserSetup-x64-1.108.0.exe";
+            Source="C:\HyperV\ADRES\Files\Tools\VSCodeUserSetup-x64-1.108.0.exe"},
+    @{
+            Path="Install";
+            Name="powershell-2025.4.0.vsix";
+            Source="C:\HyperV\ADRES\Files\Tools\powershell-2025.4.0.vsix"},
+    @{
+            Path="Install";
+            Name="Anaconda3-2025.12-1-Windows-x86_64.exe";
+            Source="C:\HyperV\ADRES\Files\Tools\Anaconda3-2025.12-1-Windows-x86_64.exe"},
+    @{
+            Path="Install";
+            Name="ProcessExplorer.zip";
+            Source="C:\HyperV\ADRES\Files\Tools\ProcessExplorer.zip"},
+    @{
+            Path="Install";
+            Name="ProcessMonitor.zip";
+            Source="C:\HyperV\ADRES\Files\Tools\ProcessMonitor.zip"},
+    @{
+            Path="Install";
+            Name="PSTools.zip";
+            Source="C:\HyperV\ADRES\Files\Tools\PSTools.zip"},
+    @{
+            Path="Install";
+            Name="Windows System Image Manager-x86_en-us.msi";
             Source="C:\HyperV\ADRES\Files\Tools\Windows System Image Manager-x86_en-us.msi"}
     )
     };
@@ -409,7 +483,13 @@ Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
 
 "@
 
-        }
+        };
+    FilesToCopy=@(
+    @{
+            Path="Install";
+            Name="AzureADConnect.msi";
+            Source="C:\HyperV\ADRES\Files\Tools\AzureADConnect.msi"}
+    )
     };
 "CA01"=@{
     BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
@@ -592,6 +672,9 @@ $LABConfig.Keys | ForEach-Object {
     -Generation 2 `
     -Switch $VMConfig.Switch
 
+    Set-VMKeyProtector -VMName $VMName -KeyProtector $KeyProtector.RawData
+    Enable-VMTPM -VMName $VMName
+    
     Set-VMProcessor -VMName $VMName -Count $VMConfig.CPU
 
     if($VMConfig.DVD)
