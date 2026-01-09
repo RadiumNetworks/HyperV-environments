@@ -1,7 +1,7 @@
 dn: CN=38976.5C55CD536CFE4CFFAAD3832359F82823,CN=OID,CN=Public Key Services,CN=Services,CN=Configuration,RootDomain
 changetype: add
 cn: 38976.5C55CD536CFE4CFFAAD3832359F82823
-displayName: ICE Web Server 2
+displayName: Corp Web Server
 distinguishedName: 
  CN=38976.5C55CD536CFE4CFFAAD3832359F82823,CN=OID,CN=Public Key Services,CN=Services,CN=Configuration,RootDomain
 dSCorePropagationData: 16010101000000.0Z
