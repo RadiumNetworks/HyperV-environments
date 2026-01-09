@@ -51,3 +51,4 @@
     </settings>
     <cpi:offlineImage cpi:source="wim:c:/users/administrator.hq/downloads/install.wim#Windows Server 2016 SERVERDATACENTERCORE" xmlns:cpi="urn:schemas-microsoft-com:cpi" />
 </unattend>
+
