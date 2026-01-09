@@ -354,7 +354,37 @@ Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
 
 "@
 
-        }
+        };
+    FilesToCopy=@(
+    @{
+            Path="Install";
+            Name="AdExplorer.zip";
+            Source="C:\HyperV\ADRES\Files\Tools\AdExplorer.zip"},
+    @{
+            Path="Install";
+            Name="AdInsight.zip";
+            Source="C:\HyperV\ADRES\Files\Tools\AdInsight.zip"},
+    @{
+            Path="Install";
+            Name="ADRestore.zip";
+            Source="C:\HyperV\ADRES\Files\Tools\ADRestore.zip"},
+    @{
+            Path="Install";
+            Name="ProcessExplorer.zip";
+            Source="C:\HyperV\ADRES\Files\Tools\ProcessExplorer.zip"},
+    @{
+            Path="Install";
+            Name="ProcessMonitor.zip";
+            Source="C:\HyperV\ADRES\Files\Tools\ProcessMonitor.zip"},
+    @{
+            Path="Install";
+            Name="PSTools.zip";
+            Source="C:\HyperV\ADRES\Files\Tools\PSTools.zip"},
+    @{
+            Path="Install";
+            Name="Windows System Image Manager-x86_en-us.msi";
+            Source="C:\HyperV\ADRES\Files\Tools\Windows System Image Manager-x86_en-us.msi"}
+    )
     };
 "ENTRA01"=@{
     BaseDisc="C:\HyperV\ADRES\2016\Base2016GUI.vhdx";
@@ -468,8 +498,53 @@ Install-AdcsCertificationAuthority `
 -ValidityPeriod Years `
 -ValidityPeriodUnits 5
 '@
+        },
+        @{
+            Path="Install";
+            Name="CreateTemplate.txt";
+            Content=@"
+ldifde -i -f C:\Install\kerberosoid.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
+ldifde -i -f C:\Install\kerberos.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
+
+ldifde -i -f C:\Install\webserveroid.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
+ldifde -i -f C:\Install\webservers.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
+
+ldifde -i -f C:\Install\smartcardoid.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
+ldifde -i -f C:\Install\smartcard.ldf -k -c "RootDomain" "$RootDomain" -j C:\Install -v
+
+"@
         }
-        )
+        );
+    FilesToCopy=@(
+    @{
+            Path="Install";
+            Name="kerberos.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\kerberos.ldf"},
+    @{
+            Path="Install";
+            Name="kerberosoid.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\kerberosoid.ldf"},
+    @{
+            Path="Install";
+            Name="smartcard.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\smartcard.ldf"},
+    @{
+            Path="Install";
+            Name="smartcardoid.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\smartcardoid.ldf"},
+    @{
+            Path="Install";
+            Name="webserver.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\webserver.ldf"},
+    @{
+            Path="Install";
+            Name="webserveroid.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\webserveroid.ldf"},
+    @{
+            Path="Install";
+            Name="createoid.ps1";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\createoid.ps1"}
+    )
     };
 "ROOTDR"=@{
     BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
@@ -545,6 +620,18 @@ $LABConfig.Keys | ForEach-Object {
                 $ScriptFileName = ("{0}:\{1}\{2}" -f $_.DriveLetter,$Script.Path,$Script.Name)
                 New-Item -Path ("{0}:\{1}" -f $_.DriveLetter,$Script.Path) -Name $Script.Name -ItemType File -Force
                 Set-Content -Path $ScriptFileName -Value $Script.Content -Force
+            }
+        }
+        if($VMConfig.FilesToCopy)
+        {
+            foreach($File in $VMConfig.FilesToCopy)
+            {
+                if(!(Test-Path -Path ("{0}:\{1}" -f $_.DriveLetter,$File.Path)))
+                {
+                    New-Item -Path ("{0}:\{1}" -f $_.DriveLetter,$File.Path) -ItemType Directory -Force
+                }
+                $DestFileName = ("{0}:\{1}\{2}" -f $_.DriveLetter,$File.Path,$File.Name)
+                Copy-Item -Path $File.Source -Destination $DestFileName -Force
             }
         }
     }
