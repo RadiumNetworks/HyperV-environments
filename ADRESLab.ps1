@@ -1,4 +1,4 @@
-﻿$RootDomain = "ice.corp.com"
+$RootDomain = "ice.corp.com"
 $RootDomainDN = "DC=ice,DC=corp,DC=com"
 $NBRootDomain = "ice"
 $ChildDomain = "hq.ice.corp.com"
@@ -36,6 +36,40 @@ Add-DnsServerResourceRecord -ZoneName $ChildDomain -IPv4Address 10.0.0.11 -A -Na
 Add-DnsServerResourceRecord -ZoneName $ChildDomain -IPv4Address 10.0.0.21 -A -Name pki
 
 "@
+
+        }
+    };
+"ROUTER01"=@{
+    BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
+    Memory=2GB;
+    Switch="Intern";
+    Switch2="Default Switch";
+    Path="C:\HyperV\ADRES";
+    CPU=2;
+    UnattendFile="C:\HyperV\ADRES\2016\unattend.xml";
+    InstallScript=@{
+            Path="Install";
+            Name="Setup.ps1";
+            Content=@'
+Install-WindowsFeature -Name RemoteAccess, Routing -IncludeManagementTools
+
+$NetworkAdapters = Get-NetAdapter
+$NetworkAdapters | ForEach-Object {
+    $NetworkAdapter = $_
+    $IPConfiguration = Get-NetIPConfiguration -InterfaceIndex $NetworkAdapter.ifIndex
+    if ($IPConfiguration.IPv4Address.IPAddress -like "169.254.*")
+    {
+	New-NetIPAddress -InterfaceAlias $NetworkAdapter.Name -IPAddress 10.0.0.254 -PrefixLength 24
+        Rename-NetAdapter -Name $NetworkAdapter.Name -NewName "Intern"
+    }
+    else
+    {
+        Rename-NetAdapter -Name $NetworkAdapter.Name -NewName "Extern"
+    }
+}
+Install-RemoteAccess -VpnType RoutingOnly
+New-NetNat -Name InternalNetwork -InternalIPInterfaceAddressPrefix 10.0.0.0/24
+'@
 
         }
     };
@@ -329,7 +363,7 @@ New-Item -Path C:\PKI\ -ItemType Directory
     ChangeAccess = "$NBChildDomain\Domain Admins","$NBChildDomain\Cert Publishers"
 }
 New-SmbShare @Parameters
-Grant-SmbShareAccess -Name "PKI" -AccountName "Everyone" -AccessRight Read
+Grant-SmbShareAccess -Name "Backup" -AccountName "Everyone" -AccessRight Read
 
 New-Website -Name "PKI" -Port 80 -HostHeader ("$ChildDomain") -PhysicalPath "C:\PKI"
 "@
@@ -362,6 +396,91 @@ Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
 "@
 
         };
+    AdditionalScripts=@(
+    @{
+            Path="Install";
+            Name="CreateADData.ps1";
+            Content=@'
+$ChildDomain = (Get-ADDomain).DNSRoot
+$ChildDomainDN = (Get-ADDomain).DistinguishedName
+$Cred = Get-Credential -Message "Please enter the password for the accounts"
+$HQOrgUnit = New-ADOrganizationalUnit -Name HQ -ProtectedFromAccidentalDeletion $false -PassThru
+$GroupOrgUnit = New-ADOrganizationalUnit -Name Group -Path $HQOrgUnit.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru
+$UserOrgUnit = New-ADOrganizationalUnit -Name User -Path $HQOrgUnit.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru
+$ComputerOrgUnit = New-ADOrganizationalUnit -Name Computer -Path $HQOrgUnit.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru
+$ServiceAccountsOrgUnit = New-ADOrganizationalUnit -Name ServiceAccounts -Path $HQOrgUnit.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru
+
+$Users = @(
+@{Name="Bob Kelly";UPN="Bob@$ChildDomain";GivenName="Bob";SurName="Kelly";DisplayName="Bob Kelly"},
+@{Name="Holly Holt";UPN="Holly@$ChildDomain";GivenName="Holly";SurName="Holt";DisplayName="Holly Holt"},
+@{Name="John Woods";UPN="John@$ChildDomain";GivenName="John";SurName="Woods";DisplayName="John Woods"},
+@{Name="Mike Ray";UPN="Mike@$ChildDomain";GivenName="Mike";SurName="Ray";DisplayName="Mike Ray"},
+@{Name="Nuno Bento";UPN="Nuno@$ChildDomain";GivenName="Nuno";SurName="Bento";DisplayName="Nuno Bento"},
+@{Name="Peter Houston";UPN="Peter@$ChildDomain";GivenName="Peter";SurName="Houston";DisplayName="Peter Houston"},
+@{Name="Preeda Ola";UPN="Preeda@$ChildDomain";GivenName="Preeda";SurName="Ola";DisplayName="Preeda Ola"},
+@{Name="Spencer Law";UPN="Spencer@$ChildDomain";GivenName="Spencer";SurName="Law";DisplayName="Spencer Law"},
+@{Name="Terry Adams";UPN="Terry@$ChildDomain";GivenName="Terry";SurName="Adams";DisplayName="Terry Adams"},
+@{Name="Zheng Mu";UPN="Zheng@$ChildDomain";GivenName="Zheng";SurName="Mu";DisplayName="Zheng Mu"}
+)
+$Users | Foreach-Object {
+	$User = $_
+	New-ADUser -Name $User.Name `
+		-AccountPassword $Cred.Password `
+		-UserPrincipalName $User.UPN `
+		-DisplayName $User.DisplayName `
+		-GivenName $User.GivenName `
+		-SurName $User.SurName `
+		-Path $UserOrgUnit.DistinguishedName `
+		-Enabled $true
+}
+
+$ServiceAccounts = @(
+@{Name="DES Service";UPN="dessvc@$ChildDomain";ServicePrincipalNames="http/desweb.$ChildDomain";DisplayName="DES Service"},
+@{Name="RC4 Service";UPN="rc4svc@$ChildDomain";ServicePrincipalNames="http/rc4web.$ChildDomain";DisplayName="RC4 Service"},
+@{Name="AES Service";UPN="aessvc@$ChildDomain";ServicePrincipalNames="http/aesweb.$ChildDomain";DisplayName="AES Service"},
+@{Name="DefaultEnc Service";UPN="defaultencsvc@$ChildDomain";ServicePrincipalNames="http/defaultencweb.$ChildDomain";DisplayName="DefaultEnc Service"}
+)
+$ServiceAccounts | Foreach-Object {
+	$User = $_
+	New-ADUser -Name $User.Name `
+		-AccountPassword $Cred.Password `
+		-UserPrincipalName $User.UPN `
+		-DisplayName $User.DisplayName `
+		-ServicePrincipalNames $User.ServicePrincipalNames `
+		-Path $ServiceAccountsOrgUnit.DistinguishedName `
+		-Enabled $true
+}
+
+$Groups = @(
+@{Name="GG_WebServer";Category="Security";Scope="Global"},
+@{Name="GL_WebServer";Category="Security";Scope="DomainLocal"},
+@{Name="GU_WebServer";Category="Security";Scope="Universal"},
+@{Name="GG_SmartCardUser";Category="Security";Scope="Global"},
+@{Name="GL_SmartCardUser";Category="Security";Scope="DomainLocal"},
+@{Name="GU_SmartCardUser";Category="Security";Scope="Universal"}
+)
+$Groups | Foreach-Object {
+	$Group = $_
+	New-ADGroup -Name $Group.Name `
+		-GroupCategory $Group.Category `
+		-GroupScope $Group.Scope `
+		-Path $GroupOrgUnit.DistinguishedName `
+}
+Add-ADGroupMember -Identity GL_WebServer -Members GG_WebServer
+Add-ADGroupMember -Identity GL_SmartCardUser -Members GG_SmartCardUser
+
+$DomainMembers = Get-ADComputer -SearchBase ("CN=Computers,{0}" -f $ChildDomainDN) -Filter *
+$DomainMembers | ForEach-Object { Move-ADObject -Identity $_ -TargetPath $ComputerOrgUnit.DistinguishedName }
+
+$Servers = Get-ADComputer -Filter 'OperatingSystem -like "Windows Server*" -SearchBase $ComputerOrgUnit.DistinguishedName
+Add-ADGroupMember -Identity GG_WebServer -Members $Servers
+
+$Users = Get-ADUser -Filter * -SearchBase $UserOrgUnit.DistinguishedName
+Add-ADGroupMember -Identity GG_SmartCardUser -Members $Users
+
+'@
+        }
+        );
     FilesToCopy=@(
     @{
             Path="Install";
@@ -394,7 +513,11 @@ Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
     @{
             Path="Install";
             Name="SSMS-Setup-ENU.exe";
-            Source="C:\HyperV\ADRES\Files\Tools\SSMS-Setup-ENU.exe"}
+            Source="C:\HyperV\ADRES\Files\Tools\SSMS-Setup-ENU.exe"},
+    @{
+            Path="Install";
+            Name="MicrosoftEdgeSetup.exe";
+            Source="C:\HyperV\ADRES\Files\Tools\MicrosoftEdgeSetup.exe"}
     )
     };
 "CLIENT01"=@{
@@ -489,7 +612,11 @@ Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
     @{
             Path="Install";
             Name="AzureADConnect.msi";
-            Source="C:\HyperV\ADRES\Files\Tools\AzureADConnect.msi"}
+            Source="C:\HyperV\ADRES\Files\Tools\AzureADConnect.msi"},
+    @{
+            Path="Install";
+            Name="MicrosoftEdgeSetup.exe";
+            Source="C:\HyperV\ADRES\Files\Tools\MicrosoftEdgeSetup.exe"}
     )
     };
 "CA01"=@{
@@ -684,6 +811,11 @@ $LABConfig.Keys | ForEach-Object {
         Add-VMDvdDrive -VMName $VMName -Path $VMConfig.DVD
     }
 
+    if($VMConfig.Switch2)
+    {
+        Add-VMNetworkAdapter -VMName $VMName -SwitchName $VMConfig.Switch2
+    }
+
     $VMDisk = Mount-VHD -Path $VHDPath -Passthru | Get-Disk 
     $VMVolume = $VMDisk | Get-Partition | Get-Volume
     $VMVolume | Where-Object { $_.DriveLetter } | ForEach-Object {
@@ -722,5 +854,4 @@ $LABConfig.Keys | ForEach-Object {
     }
     Dismount-VHD -DiskNumber $VMDisk.DiskNumber
 }
-
 
