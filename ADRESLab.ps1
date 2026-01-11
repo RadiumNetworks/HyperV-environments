@@ -1,4 +1,4 @@
-$RootDomain = "ice.corp.com"
+﻿$RootDomain = "ice.corp.com"
 $RootDomainDN = "DC=ice,DC=corp,DC=com"
 $NBRootDomain = "ice"
 $ChildDomain = "hq.ice.corp.com"
@@ -309,6 +309,31 @@ Start-WBBackup -Policy `$policy
         }
         )
     };
+"CHILDDC25"=@{
+    BaseDisc="C:\HyperV\ADRES\2025\Base2025GUI.vhdx";
+    Memory=4GB;
+    Switch="Intern";
+    Path="C:\HyperV\ADRES";
+    CPU=2;
+    UnattendFile="C:\HyperV\ADRES\2025\unattend.xml";
+    InstallScript=@{
+            Path="Install";
+            Name="Setup.ps1";
+            Content=@"
+Write-Host "This will install the upgrade DC in $ChildDomain"
+Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and CHILDDC01 are configured."
+`$Cred = Get-Credential -Message "Please enter the password" -UserName $NBChildDomain\Administrator 
+
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.13 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
+
+Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
+
+"@
+
+        };
+            };
 "DATA01"=@{
     BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
     Memory=2GB;
@@ -679,6 +704,31 @@ ldifde -i -f C:\Install\smartcard.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\I
             Source="C:\HyperV\ADRES\Files\Certificate Templates\createoid.ps1"}
     )
     };
+"MGMT25"=@{
+    BaseDisc="C:\HyperV\ADRES\2025\Base2025GUI.vhdx";
+    Memory=4GB;
+    Switch="Intern";
+    Path="C:\HyperV\ADRES";
+    CPU=2;
+    UnattendFile="C:\HyperV\ADRES\2025\unattend.xml";
+    InstallScript=@{
+            Path="Install";
+            Name="Setup.ps1";
+            Content=@"
+Write-Host "This will install the entra connect server in $ChildDomain"
+Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and CHILDDC01 are configured."
+`$Cred = Get-Credential -Message "Please enter the password" -UserName $NBChildDomain\Administrator 
+
+`$Adapter = Get-NetAdapter -Physical | Where-Object {`$_.Status -eq "Up"}
+New-NetIPAddress -InterfaceAlias `$Adapter.Name -IPAddress 10.0.0.41 -PrefixLength 24 -DefaultGateway 10.0.0.254
+Set-DnsClientServerAddress -InterfaceAlias `$Adapter.Name -ServerAddresses ("10.0.0.253")
+
+Add-Computer -DomainName $ChildDomain -Restart -Credential `$Cred
+
+"@
+
+        };
+            };
 "CLIENT01"=@{
     BaseDisc="C:\HyperV\ADRES\11\Base11.vhdx";
     Memory=4GB;
@@ -858,8 +908,7 @@ Install-WindowsFeature ADCS-Cert-Authority,RSAT-ADDS-Tools
 Copy-Item -Path C:\install\capolicy.inf -Destination c:\Windows\capolicy.inf
 
 Install-AdcsCertificationAuthority `
--CACommonName SECURECA01 `
--CAType EnterpriseRootCA `
+-CACommonName SECURECA01 `-CAType EnterpriseRootCA `
 -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" `
 -HashAlgorithmName SHA512 `
 -KeyLength 4096 `
