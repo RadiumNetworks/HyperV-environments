@@ -34,7 +34,8 @@ Add-DnsServerResourceRecord -ZoneName $RootDomain -IPv4Address 10.0.0.1 -A -Name
 Add-DnsServerPrimaryZone -Name $ChildDomain -ZoneFile $ChildDomain.dns -DynamicUpdate NonsecureAndSecure
 Add-DnsServerResourceRecord -ZoneName $ChildDomain -IPv4Address 10.0.0.11 -A -Name .
 Add-DnsServerResourceRecord -ZoneName $ChildDomain -IPv4Address 10.0.0.21 -A -Name pki
-
+#Add-DnsServerForwarder -IPAddress "8.8.8.8" -PassThru
+#Get-DnsServerRootHint | Remove-DnsServerRootHint -Force
 "@
 
         }
@@ -67,8 +68,10 @@ $NetworkAdapters | ForEach-Object {
         Rename-NetAdapter -Name $NetworkAdapter.Name -NewName "Extern"
     }
 }
+Start-Sleep -Seconds 5
 Install-RemoteAccess -VpnType RoutingOnly
 New-NetNat -Name InternalNetwork -InternalIPInterfaceAddressPrefix 10.0.0.0/24
+Start-Sleep -Seconds 5
 '@
 
         }
@@ -472,13 +475,141 @@ Add-ADGroupMember -Identity GL_SmartCardUser -Members GG_SmartCardUser
 $DomainMembers = Get-ADComputer -SearchBase ("CN=Computers,{0}" -f $ChildDomainDN) -Filter *
 $DomainMembers | ForEach-Object { Move-ADObject -Identity $_ -TargetPath $ComputerOrgUnit.DistinguishedName }
 
-$Servers = Get-ADComputer -Filter 'OperatingSystem -like "Windows Server*" -SearchBase $ComputerOrgUnit.DistinguishedName
+$Servers = Get-ADComputer -Filter 'OperatingSystem -like "Windows Server*"' -SearchBase $ComputerOrgUnit.DistinguishedName
 Add-ADGroupMember -Identity GG_WebServer -Members $Servers
 
 $Users = Get-ADUser -Filter * -SearchBase $UserOrgUnit.DistinguishedName
 Add-ADGroupMember -Identity GG_SmartCardUser -Members $Users
 
 '@
+        },
+    @{
+            Path="Install";
+            Name="AssignCertificateTemplatePermissions.ps1";
+            Content=@'
+$null = [System.Reflection.Assembly]::LoadWithPartialName("System.DirectoryServices.Protocols")
+
+#AccessMask
+$ADS_RIGHT_DS_CREATE_CHILD = 1
+$ADS_RIGHT_DS_DELETE_CHILD = 2
+$ADS_RIGHT_ACTRL_DS_LIST = 4
+$ADS_RIGHT_DS_SELF = 8
+$ADS_RIGHT_DS_READ_PROP = 16
+$ADS_RIGHT_DS_WRITE_PROP = 32
+$ADS_RIGHT_DS_DELETE_TREE = 64
+$ADS_RIGHT_DS_LIST_OBJECT = 128
+$ADS_RIGHT_DS_CONTROL_ACCESS = 256
+
+$ADS_RIGHT_DELETE = 65536
+$ADS_RIGHT_READ_CONTROL = 131072
+$ADS_RIGHT_WRITE_DAC = 262144
+$ADS_RIGHT_WRITE_OWNER = 524288
+$ADS_RIGHT_SYNCHRONIZE = 1048576
+$ADS_RIGHT_ACCESS_SYSTEM_SECURITY = 16777216
+
+$ADS_RIGHT_GENERIC_ALL = 268435456
+$ADS_RIGHT_GENERIC_EXECUTE = 536870912
+$ADS_RIGHT_GENERIC_WRITE = 1073741824
+$ADS_RIGHT_GENERIC_READ = 2147483648
+
+$TemplatePermissions = @(
+@{Template="CorpWebServer";EnrollGroup="GL_WebServer"},
+@{Template="CorpSmartcardLogon";EnrollGroup="GL_SmartCardUser"},
+@{Template="CorpKerberosAuthentication";EnrollGroup="Domain Controllers";AutoEnrollmentGroup="Domain Controllers"}
+)
+
+#DCLocator
+$DirectoryCtx = New-Object System.DirectoryServices.ActiveDirectory.DirectoryContext Domain
+$Site = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Name
+$LocatorOptions = [System.DirectoryServices.ActiveDirectory.LocatorOptions]::ForceRediscovery -bor [System.DirectoryServices.ActiveDirectory.LocatorOptions]::WriteableRequired
+if ($Site)
+{
+	$DC = [System.DirectoryServices.ActiveDirectory.DomainController]::FindOne($DirectoryCtx,$Site,$LocatorOptions)
+}
+else
+{
+	$DC = [System.DirectoryServices.ActiveDirectory.DomainController]::FindOne($DirectoryCtx,$LocatorOptions)
+}
+
+$ldapDirectoryID = New-Object System.DirectoryServices.Protocols.LdapDirectoryIdentifier $DC.Name, 389, $true, $true
+$LDAPConnection = New-Object System.DirectoryServices.Protocols.LdapConnection $ldapDirectoryID
+
+#Get NamingContexts
+$LDAPFilter = "(objectclass=*)"
+$SearchScope = [System.DirectoryServices.Protocols.SearchScope]::Base
+$SearchRequest = New-Object System.DirectoryServices.Protocols.SearchRequest "",$LDAPFilter,$SearchScope,$null
+$SearchResponse = $LDAPConnection.SendRequest($SearchRequest)
+
+$dNC = $SearchResponse.Entries[0].Attributes["defaultnamingcontext"][0]
+$cNC = $SearchResponse.Entries[0].Attributes["configurationnamingcontext"][0]
+
+$LDAPConnection = New-Object System.DirectoryServices.Protocols.LdapConnection  $DC.Name
+
+$TemplatePermissions | ForEach-Object {
+
+    $LDAPFilter = "(&(objectclass=pKICertificateTemplate)(cn={0}))" -f $_.Template
+    $SearchScope = [System.DirectoryServices.Protocols.SearchScope]::SubTree
+    $SearchRequest = New-Object System.DirectoryServices.Protocols.SearchRequest "CN=Certificate Templates,CN=Public Key Services,CN=Services,$cNC",$LDAPFilter,$SearchScope,$null
+    $SearchRequest.Attributes.Add("ntSecurityDescriptor")
+    $SearchRequest.Attributes.Add("distinguishedname")
+    $SearchResponse = $LDAPConnection.SendRequest($SearchRequest)
+
+    #Get ACL Object from BinaryForm
+    $ntSecurityDescriptor = $SearchResponse.Entries[0].Attributes["ntsecuritydescriptor"][0]
+    $ACL = New-Object System.Security.AccessControl.CommonSecurityDescriptor "true","true",$ntSecurityDescriptor,0
+
+
+    $accessType = [System.Security.AccessControl.AccessControlType]::Allow
+    $sid = (Get-ADGroup $_.EnrollGroup).SID
+    $accessMask = $ADS_RIGHT_READ_CONTROL+$ADS_RIGHT_DS_READ_PROP+$ADS_RIGHT_ACTRL_DS_LIST
+    $inheritanceFlags = [System.Security.AccessControl.InheritanceFlags]::None
+    $propagationFlags = [System.Security.AccessControl.PropagationFlags]::None
+    $objectFlags = [System.Security.AccessControl.ObjectAceFlags]::ObjectAceTypePresent
+    $objectType = [guid]::Parse("0e10c968-78fb-11d2-90d4-00c04f79dc55")
+    $inheritedObjectType = [guid]::Parse("00000000-0000-0000-0000-000000000000")
+
+    $null = $ACl.DiscretionaryAcl.AddAccess($accessType,$sid,$accessMask,$inheritanceFlags,$propagationFlags)
+
+    $accessMask = $ADS_RIGHT_DS_CONTROL_ACCESS
+
+    $null = $ACl.DiscretionaryAcl.AddAccess($accessType,$sid,$accessMask,$inheritanceFlags,$propagationFlags,$objectFlags,$objectType,$inheritedObjectType)
+
+    if($_.AutoEnrollmentGroup)
+    {
+        $objectType = [guid]::Parse("a05b8cc2-17bc-4802-a710-e7c15ab866a2")
+        $null = $ACl.DiscretionaryAcl.AddAccess($accessType,$sid,$accessMask,$inheritanceFlags,$propagationFlags,$objectFlags,$objectType,$inheritedObjectType)
+    }
+    #Get BinaryACL Object from ACL
+    [byte[]]$BinaryACL = New-Object System.Byte[] $ACL.BinaryLength
+    $ACL.GetBinaryForm($BinaryACL,0)
+
+    #Update ACL
+    $DN = $SearchResponse.Entries[0].Attributes["distinguishedname"][0]
+    $Operation = [System.DirectoryServices.Protocols.DirectoryAttributeOperation]::Replace
+    $Attribute = "ntSecurityDescriptor"
+    $Value = $BinaryACL
+    $Request = New-Object System.DirectoryServices.Protocols.ModifyRequest $DN,$Operation,$Attribute,$Value
+    $null = $LDAPConnection.SendRequest($Request)
+
+}
+
+
+'@
+        },
+    @{
+            Path="Install";
+            Name="CreateTemplate.txt";
+            Content=@"
+ldifde -i -f C:\Install\kerberosoid.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
+ldifde -i -f C:\Install\kerberos.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
+
+ldifde -i -f C:\Install\webserveroid.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
+ldifde -i -f C:\Install\webserver.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
+
+ldifde -i -f C:\Install\smartcardoid.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
+ldifde -i -f C:\Install\smartcard.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
+
+"@
         }
         );
     FilesToCopy=@(
@@ -517,7 +648,35 @@ Add-ADGroupMember -Identity GG_SmartCardUser -Members $Users
     @{
             Path="Install";
             Name="MicrosoftEdgeSetup.exe";
-            Source="C:\HyperV\ADRES\Files\Tools\MicrosoftEdgeSetup.exe"}
+            Source="C:\HyperV\ADRES\Files\Tools\MicrosoftEdgeSetup.exe"},
+    @{
+            Path="Install";
+            Name="kerberos.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\kerberos.ldf"},
+    @{
+            Path="Install";
+            Name="kerberosoid.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\kerberosoid.ldf"},
+    @{
+            Path="Install";
+            Name="smartcard.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\smartcard.ldf"},
+    @{
+            Path="Install";
+            Name="smartcardoid.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\smartcardoid.ldf"},
+    @{
+            Path="Install";
+            Name="webserver.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\webserver.ldf"},
+    @{
+            Path="Install";
+            Name="webserveroid.ldf";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\webserveroid.ldf"},
+    @{
+            Path="Install";
+            Name="createoid.ps1";
+            Source="C:\HyperV\ADRES\Files\Certificate Templates\createoid.ps1"}
     )
     };
 "CLIENT01"=@{
@@ -707,53 +866,8 @@ Install-AdcsCertificationAuthority `
 -ValidityPeriod Years `
 -ValidityPeriodUnits 5
 '@
-        },
-        @{
-            Path="Install";
-            Name="CreateTemplate.txt";
-            Content=@"
-ldifde -i -f C:\Install\kerberosoid.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
-ldifde -i -f C:\Install\kerberos.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
-
-ldifde -i -f C:\Install\webserveroid.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
-ldifde -i -f C:\Install\webserver.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
-
-ldifde -i -f C:\Install\smartcardoid.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
-ldifde -i -f C:\Install\smartcard.ldf -k -c "RootDomain" "$RootDomainDN" -j C:\Install -v
-
-"@
         }
         );
-    FilesToCopy=@(
-    @{
-            Path="Install";
-            Name="kerberos.ldf";
-            Source="C:\HyperV\ADRES\Files\Certificate Templates\kerberos.ldf"},
-    @{
-            Path="Install";
-            Name="kerberosoid.ldf";
-            Source="C:\HyperV\ADRES\Files\Certificate Templates\kerberosoid.ldf"},
-    @{
-            Path="Install";
-            Name="smartcard.ldf";
-            Source="C:\HyperV\ADRES\Files\Certificate Templates\smartcard.ldf"},
-    @{
-            Path="Install";
-            Name="smartcardoid.ldf";
-            Source="C:\HyperV\ADRES\Files\Certificate Templates\smartcardoid.ldf"},
-    @{
-            Path="Install";
-            Name="webserver.ldf";
-            Source="C:\HyperV\ADRES\Files\Certificate Templates\webserver.ldf"},
-    @{
-            Path="Install";
-            Name="webserveroid.ldf";
-            Source="C:\HyperV\ADRES\Files\Certificate Templates\webserveroid.ldf"},
-    @{
-            Path="Install";
-            Name="createoid.ps1";
-            Source="C:\HyperV\ADRES\Files\Certificate Templates\createoid.ps1"}
-    )
     };
 "ROOTDR"=@{
     BaseDisc="C:\HyperV\ADRES\2016\Base2016Core.vhdx";
