@@ -908,7 +908,8 @@ Install-WindowsFeature ADCS-Cert-Authority,RSAT-ADDS-Tools
 Copy-Item -Path C:\install\capolicy.inf -Destination c:\Windows\capolicy.inf
 
 Install-AdcsCertificationAuthority `
--CACommonName SECURECA01 `-CAType EnterpriseRootCA `
+-CACommonName SECURECA01 `
+-CAType EnterpriseRootCA `
 -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" `
 -HashAlgorithmName SHA512 `
 -KeyLength 4096 `
