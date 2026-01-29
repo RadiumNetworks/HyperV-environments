@@ -1,0 +1,829 @@
+﻿{
+    "RootDomain" : "ice.corp.com",
+    "RootDomainDN" : "DC=ice,DC=corp,DC=com",
+    "NBRootDomain" : "ice",
+    "ChildDomain" : "cool.ice.corp.com",
+    "NBChildDomain" : "cool",
+    "VMConfig" : [
+        {
+            "Name" : "DNS01",
+            "Path": "C:\\HyperV\\ADRES",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016Core.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Add-WindowsFeature DNS -IncludeManagementTools',
+                        '$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up" }',
+                        'New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.253 -PrefixLength 24 -DefaultGateway 10.0.0.254',
+                        'Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")',
+                        'Add-DnsServerPrimaryZone -Name "." -ZoneFile "root.dns"',
+                        'Add-DnsServerPrimaryZone -Name <RootDomain> -ZoneFile <RootDomain>.dns -DynamicUpdate NonsecureAndSecure',
+                        'Add-DnsServerResourceRecord -ZoneName <RootDomain> -IPv4Address 10.0.0.1 -A -Name .',
+                        'Add-DnsServerPrimaryZone -Name <ChildDomain> -ZoneFile <ChildDomain>.dns -DynamicUpdate NonsecureAndSecure',
+                        'Add-DnsServerResourceRecord -ZoneName <ChildDomain> -IPv4Address 10.0.0.11 -A -Name .',
+                        'Add-DnsServerResourceRecord -ZoneName <ChildDomain> -IPv4Address 10.0.0.21 -A -Name pki',
+                        'Start-Sleep -Seconds 10'
+                    ]
+                }
+            ]
+        },
+        {
+            "Name" : "ROUTER01",
+            "Path": "C:\\HyperV\\ADRES",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern","Default Switch"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016Core.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Install-WindowsFeature -Name RemoteAccess, Routing -IncludeManagementTools',
+                        '$NetworkAdapters = Get-NetAdapter',
+                        '$NetworkAdapters | ForEach-Object {',
+                        '    $NetworkAdapter = $_',
+                        '    $IPConfiguration = Get-NetIPConfiguration -InterfaceIndex $NetworkAdapter.ifIndex',
+                        '    if ($IPConfiguration.IPv4Address.IPAddress -like "169.254.*")',
+                        '    {',
+	                    '    New-NetIPAddress -InterfaceAlias $NetworkAdapter.Name -IPAddress 10.0.0.254 -PrefixLength 24',
+                        '        Rename-NetAdapter -Name $NetworkAdapter.Name -NewName "Intern"',
+                        '    }',
+                        '    else',
+                        '    {',
+                        '        Rename-NetAdapter -Name $NetworkAdapter.Name -NewName "Extern"',
+                        '    }',
+                        '}',
+                        'Start-Sleep -Seconds 5',
+                        '#Install-RemoteAccess -VpnType RoutingOnly',
+                        'New-NetNat -Name InternalNetwork -InternalIPInterfaceAddressPrefix 10.0.0.0/24',
+                        'Start-Sleep -Seconds 5'
+                    ]   
+                }
+            ]
+        },
+        {
+            "Name" : "ROOTDC01",
+            "Path": "C:\\HyperV\\ADRES",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016Core.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Write-Host "This will install the first Domain Controller for the domain <Rootdomain>"',
+                        'Read-Host -Prompt "Press Enter to continue only after the DNS Server is configured."',
+                        '',
+                        '$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}',
+                        'New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.1 -PrefixLength 24 -DefaultGateway 10.0.0.254',
+                        'Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")',
+                        '',
+                        'Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools',
+                        '',
+                        '$SecureString = ConvertTo-SecureString -String "<Password>" -AsPlainText -Force',
+                        '',
+                        'Install-ADDSForest `',
+                        '-CreateDnSDelegation:$false `',
+                        '-DatabasePath "C:\\Windows\\NTDS" `',
+                        '-DomainMode "WinThreshold" `',
+                        '-DomainName <RootDomain> `',
+                        '-DomainNetbiosName <NBRootDomain> `',
+                        '-ForestMode "WinThreshold" `',
+                        '-InstallDns:$false `',
+                        '-LogPath "C:\\Windows\\NTDS" `',
+                        '-NoRebootOnCompletion:$false `',
+                        '-SysvolPath "C:\\Windows\\SYSVOL" `',
+                        '-Force:$true `',
+                        '-SafeModeAdministratorPassword $SecureString',
+                        'Start-Sleep -Seconds 10'
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "CreateBackupSchedule.ps1",
+                    "Content": [
+                        'Install-WindowsFeature Windows-Server-Backup -IncludeAllSubFeature -IncludeManagementTools',
+                        '',
+                        '$Policy = New-WBPolicy',
+                        'Add-WBSystemState -Policy $Policy',
+                        'Add-WBBareMetalRecovery -Policy $Policy',
+                        'Set-WBVssBackupOptions -Policy $Policy -VssCopyBackup',
+                        '$Backuplocation = New-WBBackupTarget -NetworkPath "\\\\DATA01\\Backup"',
+                        'Add-WBBackupTarget -Policy $Policy -Target $Backuplocation',
+                        'Set-WBSchedule -Policy $Policy -Schedule 01:00',
+                        'Start-WBBackup -Policy $policy'
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "CreateNewAdmin.ps1",
+                    "Content": [
+                        '$SecureString = ConvertTo-SecureString -String "<Password>" -AsPlainText -Force',
+                        '',
+                        'New-ADUser -Name Admin -AccountPassword $SecureString -UserPrincipalName Admin@<ChildDomain> -DisplayName Admin -Description "MasterOfDisaster" -Server <ChildDomain> -Enabled $true',
+                        'Start-Sleep -Seconds 30',
+                        '$User = Get-ADUser -Identity Admin -Server <ChildDomain>',
+                        '$Group = Get-ADGroup -Identity "Enterprise Admins"',
+                        'Add-ADGroupMember -Identity $Group -Members $User',
+                        '$Group = Get-ADGroup -Identity "Administrators"',
+                        'Add-ADGroupMember -Identity $Group -Members $User',
+                        '$Group = Get-ADGroup -Identity "Domain Admins" -Server <ChildDomain>',
+                        'Add-ADGroupMember -Identity $Group -Members $User'
+                    ]
+                }
+            ]
+        },
+        {
+            "Name" : "ROOTDC02",
+            "Path": "C:\\HyperV\\ADRES",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016Core.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Write-Host "This will install the second Domain Controller for the domain <Rootdomain>"',
+                        'Read-Host -Prompt "Press Enter to continue only after the DNS Server and ROOTDC01 are configured."',
+                        '',
+                        '$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}',
+                        'New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.2 -PrefixLength 24 -DefaultGateway 10.0.0.254',
+                        'Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")',
+                        '',
+                        'Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools',
+                        '',
+                        '$AdminAccount = "<NBRootDomain>\\Administrator"',
+                        '$SecureString = ConvertTo-SecureString -String "<Password>" -AsPlainText -Force',
+                        '$Cred = [System.Management.Automation.PSCredential]::new($AdminAccount,$SecureString)',
+                        '',
+                        'Install-ADDSDomainController `',
+                        '-Credential $Cred `',
+                        '-CreateDnSDelegation:$false `',
+                        '-DatabasePath "C:\\Windows\\NTDS" `',
+                        '-DomainName <RootDomain> `',
+                        '-InstallDns:$false `',
+                        '-LogPath "C:\\Windows\\NTDS" `',
+                        '-NoRebootOnCompletion:$false `',
+                        '-SysvolPath "C:\\Windows\\SYSVOL" `',
+                        '-Force:$true `',
+                        '-SafeModeAdministratorPassword $SecureString',
+                        'Start-Sleep -Seconds 10'
+                        ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "CreateBackupSchedule.ps1",
+                    "Content": [
+                        'Install-WindowsFeature Windows-Server-Backup -IncludeAllSubFeature -IncludeManagementTools',
+                        '',
+                        '$Policy = New-WBPolicy',
+                        'Add-WBSystemState -Policy $Policy',
+                        'Add-WBBareMetalRecovery -Policy $Policy',
+                        'Set-WBVssBackupOptions -Policy $Policy -VssCopyBackup',
+                        '$Backuplocation = New-WBBackupTarget -NetworkPath "\\\\DATA01\\Backup"',
+                        'Add-WBBackupTarget -Policy $Policy -Target $Backuplocation',
+                        'Set-WBSchedule -Policy $Policy -Schedule 01:00',
+                        'Start-WBBackup -Policy $policy'
+                    ]
+                }
+            ]
+        },
+        {
+            "Name" : "CHILDDC01",
+            "Path": "C:\\HyperV\\ADRES",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016Core.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Write-Host "This will install the first Domain Controller for the domain <ChildDomain>"',
+                        'Read-Host -Prompt "Press Enter to continue only after the DNS Server and ROOTDC01 are configured."',
+                        '',
+                        '$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}',
+                        'New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.11 -PrefixLength 24 -DefaultGateway 10.0.0.254',
+                        'Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")',
+                        '',
+                        'Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools',
+                        '',
+                        '$AdminAccount = "<NBRootDomain>\\Administrator"',
+                        '$SecureString = ConvertTo-SecureString -String "<Password>" -AsPlainText -Force',
+                        '$cred = [System.Management.Automation.PSCredential]::new($AdminAccount,$SecureString)',
+                        '',
+                        '$params = @{',
+                        '    Credential = $Cred',
+                        '    NewDomainName = "<NBChildDomain>"',
+                        '    ParentDomainName = "<RootDomain>"',
+                        '    InstallDNS = $false',
+                        '    CreateDNSDelegation = $false',
+                        '    DomainMode = "WinThreshold"',
+                        '    DatabasePath = "C:\\Windows\\NTDS"',
+                        '    SYSVOLPath = "C:\\Windows\\SYSVOL"',
+                        '    LogPath = "C:\\Windows\\NTDS"',
+                        '    NoRebootOnCompletion = $false',
+                        '    Force = $true',
+                        '    SafeModeAdministratorPassword = $SecureString',
+                        '}',
+                        'Install-ADDSDomain @params',
+                        'Start-Sleep -Seconds 10'
+                        ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "CreateBackupSchedule.ps1",
+                    "Content": [
+                        'Install-WindowsFeature Windows-Server-Backup -IncludeAllSubFeature -IncludeManagementTools',
+                        '',
+                        '$Policy = New-WBPolicy',
+                        'Add-WBSystemState -Policy $Policy',
+                        'Add-WBBareMetalRecovery -Policy $Policy',
+                        'Set-WBVssBackupOptions -Policy $Policy -VssCopyBackup',
+                        '$Backuplocation = New-WBBackupTarget -NetworkPath "\\\\DATA01\\Backup"',
+                        'Add-WBBackupTarget -Policy $Policy -Target $Backuplocation',
+                        'Set-WBSchedule -Policy $Policy -Schedule 01:00',
+                        'Start-WBBackup -Policy $policy'
+                    ]
+                }
+            ]
+        },
+        {
+            "Name" : "CHILDDC02",
+            "Path": "C:\\HyperV\\ADRES",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016Core.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Write-Host "This will install the second Domain Controller for the domain <Childdomain>"',
+                        'Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and ChildDC01 are configured."',
+                        '',
+                        '$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}',
+                        'New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.12 -PrefixLength 24 -DefaultGateway 10.0.0.254',
+                        'Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")',
+                        '',
+                        'Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools',
+                        '',
+                        '$AdminAccount = "<NBChildDomain>\\Administrator"',
+                        '$SecureString = ConvertTo-SecureString -String "<Password>" -AsPlainText -Force',
+                        '$Cred = [System.Management.Automation.PSCredential]::new($AdminAccount,$SecureString)',
+                        '',
+                        'Install-ADDSDomainController `',
+                        '-Credential $Cred `',
+                        '-CreateDnSDelegation:$false `',
+                        '-DatabasePath "C:\\Windows\\NTDS" `',
+                        '-DomainName <ChildDomain> `',
+                        '-InstallDns:$false `',
+                        '-LogPath "C:\\Windows\\NTDS" `',
+                        '-NoRebootOnCompletion:$false `',
+                        '-SysvolPath "C:\\Windows\\SYSVOL" `',
+                        '-Force:$true `',
+                        '-SafeModeAdministratorPassword $SecureString',
+                        'Start-Sleep -Seconds 10'
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "CreateBackupSchedule.ps1",
+                    "Content": [
+                        'Install-WindowsFeature Windows-Server-Backup -IncludeAllSubFeature -IncludeManagementTools',
+                        '',
+                        '$Policy = New-WBPolicy',
+                        'Add-WBSystemState -Policy $Policy',
+                        'Add-WBBareMetalRecovery -Policy $Policy',
+                        'Set-WBVssBackupOptions -Policy $Policy -VssCopyBackup',
+                        '$Backuplocation = New-WBBackupTarget -NetworkPath "\\\\DATA01\\Backup"',
+                        'Add-WBBackupTarget -Policy $Policy -Target $Backuplocation',
+                        'Set-WBSchedule -Policy $Policy -Schedule 01:00',
+                        'Start-WBBackup -Policy $policy'
+                    ]
+                }
+            ]
+        },
+        {
+            "Name" : "DATA01",
+            "Path": "C:\\HyperV\\ADRES",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016GUI.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Write-Host "This will install the backup-/webserver in ChildDomain"',
+                        'Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and ChildDC01 are configured."',
+                        '',
+                        '$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}',
+                        'New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.21 -PrefixLength 24 -DefaultGateway 10.0.0.254',
+                        'Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")',
+                        '',
+                        '$AdminAccount = "<NBChildDomain>\\Administrator"',
+                        '$SecureString = ConvertTo-SecureString -String "<Password>" -AsPlainText -Force',
+                        '$Cred = [System.Management.Automation.PSCredential]::new($AdminAccount,$SecureString)',
+                        '',
+                        'Add-Computer -DomainName <ChildDomain> -Restart -Credential $Cred',
+                        'Start-Sleep -Seconds 10'
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "CreateBackupShare.ps1",
+                    "Content": [
+                        'New-Item -Path C:\\Backup\\ -ItemType Directory',
+                        '$Parameters = @{',
+                        '    Name = "Backup"',
+                        '    Path = "C:\\Backup"',
+                        '    ChangeAccess = "<NBChildDomain>\\Domain Admins","<NBChildDomain>\\Domain Controllers","<NBRootDomain>\\Domain Admins","<NBRootDomain>\\Domain Controllers"',
+                        '}',
+                        'New-SmbShare @Parameters',
+                        'Grant-SmbShareAccess -Name "Backup" -AccountName "Everyone" -AccessRight Read'
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "CreateHTTPCDP.ps1",
+                    "Content": [
+                        'Install-WindowsFeature -Name Web-Server -IncludeManagementTools',
+                        '',
+                        'Install-WindowsFeature Web-Mgmt-Service',
+                        'Set-ItemProperty -Path HKLM:\\SOFTWARE\\Microsoft\\WebManagement\\Server\\ -PSProperty EnableRemoteManagement -Value 1',
+                        'Set-Service WMSVC -StartupType Automatic',
+                        'Start-Service -Name WMSVC',
+                        '',
+                        'New-Item -Path C:\\PKI\\ -ItemType Directory',
+                        '$Parameters = @{',
+                        '    Name = "PKI"',
+                        '    Path = "C:\\PKI"',
+                        '    ChangeAccess = "<NBChildDomain>\\Domain Admins","<NBChildDomain>\\Cert Publishers"',
+                        '}',
+                        'New-SmbShare @Parameters',
+                        'Grant-SmbShareAccess -Name "Backup" -AccountName "Everyone" -AccessRight Read',
+                        '',
+                        'New-Website -Name "PKI" -Port 80 -HostHeader ("<ChildDomain>") -PhysicalPath "C:\\PKI"'
+                    ]
+                }
+            ],
+            "FilesAndFolders" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Tools",
+                    "Source" : "C:\\HyperV\\Files\\DATA01",
+                    "Type" : "Directory"
+                }
+            ]
+        },
+        {
+            "Name" : "MGMT01",
+            "Path": "C:\\HyperV\\ADRES",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016GUI.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Write-Host "This will install the managementserver in ChildDomain"',
+                        'Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and ChildDC01 are configured."',
+                        '',
+                        '$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}',
+                        'New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.22 -PrefixLength 24 -DefaultGateway 10.0.0.254',
+                        'Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")',
+                        '',
+                        '$AdminAccount = "<NBChildDomain>\\Administrator"',
+                        '$SecureString = ConvertTo-SecureString -String "<Password>" -AsPlainText -Force',
+                        '$Cred = [System.Management.Automation.PSCredential]::new($AdminAccount,$SecureString)',
+                        '',
+                        'Install-WindowsFeature -Name RSAT-AD-Tools,GPMC,RSAT-ADCS-Mgmt,RSAT-DNS-Server,Web-Mgmt-Tools',
+                        '',
+                        'Add-Computer -DomainName <ChildDomain> -Restart -Credential $Cred',
+                        'Start-Sleep -Seconds 10'
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "CreateADData.ps1",
+                    "Content": [
+                        '$ChildDomain = (Get-ADDomain).DNSRoot',
+                        '$ChildDomainDN = (Get-ADDomain).DistinguishedName',
+                        '$Cred = Get-Credential -Message "Please enter the password for the accounts"',
+                        '$HQOrgUnit = New-ADOrganizationalUnit -Name HQ -ProtectedFromAccidentalDeletion $false -PassThru',
+                        '$GroupOrgUnit = New-ADOrganizationalUnit -Name Group -Path $HQOrgUnit.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru',
+                        '$UserOrgUnit = New-ADOrganizationalUnit -Name User -Path $HQOrgUnit.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru',
+                        '$ComputerOrgUnit = New-ADOrganizationalUnit -Name Computer -Path $HQOrgUnit.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru',
+                        '$ServiceAccountsOrgUnit = New-ADOrganizationalUnit -Name ServiceAccounts -Path $HQOrgUnit.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru',
+                        '',
+                        '$Users = @(',
+                        '@{Name="Bob Kelly";UPN="Bob@$ChildDomain";GivenName="Bob";SurName="Kelly";DisplayName="Bob Kelly"},',
+                        '@{Name="Holly Holt";UPN="Holly@$ChildDomain";GivenName="Holly";SurName="Holt";DisplayName="Holly Holt"},',
+                        '@{Name="John Woods";UPN="John@$ChildDomain";GivenName="John";SurName="Woods";DisplayName="John Woods"},',
+                        '@{Name="Mike Ray";UPN="Mike@$ChildDomain";GivenName="Mike";SurName="Ray";DisplayName="Mike Ray"},',
+                        '@{Name="Nuno Bento";UPN="Nuno@$ChildDomain";GivenName="Nuno";SurName="Bento";DisplayName="Nuno Bento"},',
+                        '@{Name="Peter Houston";UPN="Peter@$ChildDomain";GivenName="Peter";SurName="Houston";DisplayName="Peter Houston"},',
+                        '@{Name="Preeda Ola";UPN="Preeda@$ChildDomain";GivenName="Preeda";SurName="Ola";DisplayName="Preeda Ola"},',
+                        '@{Name="Spencer Law";UPN="Spencer@$ChildDomain";GivenName="Spencer";SurName="Law";DisplayName="Spencer Law"},',
+                        '@{Name="Terry Adams";UPN="Terry@$ChildDomain";GivenName="Terry";SurName="Adams";DisplayName="Terry Adams"},',
+                        '@{Name="Zheng Mu";UPN="Zheng@$ChildDomain";GivenName="Zheng";SurName="Mu";DisplayName="Zheng Mu"}',
+                        ')',
+                        '$Users | Foreach-Object {',
+	                    '    $User = $_',
+	                    '    New-ADUser -Name $User.Name `',
+		                '        -AccountPassword $Cred.Password `',
+		                '        -UserPrincipalName $User.UPN `',
+		                '        -DisplayName $User.DisplayName `',
+		                '        -GivenName $User.GivenName `',
+		                '        -SurName $User.SurName `',
+		                '        -Path $UserOrgUnit.DistinguishedName `',
+		                '        -Enabled $true',
+                        '}',
+                        '',
+                        '$ServiceAccounts = @(',
+                        '@{Name="DES Service";UPN="dessvc@$ChildDomain";ServicePrincipalNames="http/desweb.$ChildDomain";DisplayName="DES Service";KerberosEncryptionType="DES"},',
+                        '@{Name="RC4 Service";UPN="rc4svc@$ChildDomain";ServicePrincipalNames="http/rc4web.$ChildDomain";DisplayName="RC4 Service";KerberosEncryptionType="RC4"},',
+                        '@{Name="AES Service";UPN="aessvc@$ChildDomain";ServicePrincipalNames="http/aesweb.$ChildDomain";DisplayName="AES Service";KerberosEncryptionType="AES256"},',
+                        '@{Name="DefaultEnc Service";UPN="defaultencsvc@$ChildDomain";ServicePrincipalNames="http/defaultencweb.$ChildDomain";DisplayName="DefaultEnc Service";KerberosEncryptionType="none"}',
+                        ')',
+                        '$ServiceAccounts | Foreach-Object {',
+	                    '    $User = $_',
+	                    '    New-ADUser -Name $User.Name `',
+		                '        -AccountPassword $Cred.Password `',
+		                '        -UserPrincipalName $User.UPN `',
+		                '        -DisplayName $User.DisplayName `',
+		                '        -ServicePrincipalNames $User.ServicePrincipalNames `',
+		                '        -Path $ServiceAccountsOrgUnit.DistinguishedName `',
+		                '        -Enabled $true `',
+                        '	     -KerberosEncryptionType $User.KerberosEncryptionType',
+                        '}',
+                        '',
+                        '$Groups = @(',
+                        '@{Name="GG_WebServer";Category="Security";Scope="Global"},',
+                        '@{Name="GL_WebServer";Category="Security";Scope="DomainLocal"},',
+                        '@{Name="GU_WebServer";Category="Security";Scope="Universal"},',
+                        '@{Name="GG_SmartCardUser";Category="Security";Scope="Global"},',
+                        '@{Name="GL_SmartCardUser";Category="Security";Scope="DomainLocal"},',
+                        '@{Name="GU_SmartCardUser";Category="Security";Scope="Universal"}',
+                        ')',
+                        '$Groups | Foreach-Object {',
+	                    '    $Group = $_',
+	                    '    New-ADGroup -Name $Group.Name `',
+		                '        -GroupCategory $Group.Category `',
+		                '        -GroupScope $Group.Scope `',
+		                '        -Path $GroupOrgUnit.DistinguishedName `',
+                        '}',
+                        'Add-ADGroupMember -Identity GL_WebServer -Members GG_WebServer',
+                        'Add-ADGroupMember -Identity GL_SmartCardUser -Members GG_SmartCardUser',
+                        '',
+                        '$DomainMembers = Get-ADComputer -SearchBase ("CN=Computers,{0}" -f $ChildDomainDN) -Filter *',
+                        '$DomainMembers | ForEach-Object { Move-ADObject -Identity $_ -TargetPath $ComputerOrgUnit.DistinguishedName }',
+                        '',
+                        '$Servers = Get-ADComputer -Filter \'OperatingSystem -like "Windows Server*"\' -SearchBase $ComputerOrgUnit.DistinguishedName',
+                        'Add-ADGroupMember -Identity GG_WebServer -Members $Servers',
+                        '',
+                        '$Users = Get-ADUser -Filter * -SearchBase $UserOrgUnit.DistinguishedName',
+                        'Add-ADGroupMember -Identity GG_SmartCardUser -Members $Users'
+
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "AssignCertificateTemplatePermissions.ps1",
+                    "Content": [
+                        '$null = [System.Reflection.Assembly]::LoadWithPartialName("System.DirectoryServices.Protocols")',
+                        '',
+                        '#AccessMask',
+                        '$ADS_RIGHT_DS_CREATE_CHILD = 1',
+                        '$ADS_RIGHT_DS_DELETE_CHILD = 2',
+                        '$ADS_RIGHT_ACTRL_DS_LIST = 4',
+                        '$ADS_RIGHT_DS_SELF = 8',
+                        '$ADS_RIGHT_DS_READ_PROP = 16',
+                        '$ADS_RIGHT_DS_WRITE_PROP = 32',
+                        '$ADS_RIGHT_DS_DELETE_TREE = 64',
+                        '$ADS_RIGHT_DS_LIST_OBJECT = 128',
+                        '$ADS_RIGHT_DS_CONTROL_ACCESS = 256',
+                        '',
+                        '$ADS_RIGHT_DELETE = 65536',
+                        '$ADS_RIGHT_READ_CONTROL = 131072',
+                        '$ADS_RIGHT_WRITE_DAC = 262144',
+                        '$ADS_RIGHT_WRITE_OWNER = 524288',
+                        '$ADS_RIGHT_SYNCHRONIZE = 1048576',
+                        '$ADS_RIGHT_ACCESS_SYSTEM_SECURITY = 16777216',
+                        '',
+                        '$ADS_RIGHT_GENERIC_ALL = 268435456',
+                        '$ADS_RIGHT_GENERIC_EXECUTE = 536870912',
+                        '$ADS_RIGHT_GENERIC_WRITE = 1073741824',
+                        '$ADS_RIGHT_GENERIC_READ = 2147483648',
+                        '',
+                        '$TemplatePermissions = @(',
+                        '@{Template="CorpWebServer";EnrollGroup="GL_WebServer"},',
+                        '@{Template="CorpSmartcardLogon";EnrollGroup="GL_SmartCardUser"},',
+                        '@{Template="CorpKerberosAuthentication";EnrollGroup="Domain Controllers";AutoEnrollmentGroup="Domain Controllers"}',
+                        ')',
+                        '',
+                        '#DCLocator',
+                        '$DirectoryCtx = New-Object System.DirectoryServices.ActiveDirectory.DirectoryContext Domain',
+                        '$Site = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Name',
+                        '$LocatorOptions = [System.DirectoryServices.ActiveDirectory.LocatorOptions]::ForceRediscovery -bor [System.DirectoryServices.ActiveDirectory.LocatorOptions]::WriteableRequired',
+                        'if ($Site)',
+                        '{',
+	                    '    $DC = [System.DirectoryServices.ActiveDirectory.DomainController]::FindOne($DirectoryCtx,$Site,$LocatorOptions)',
+                        '}',
+                        'else',
+                        '{',
+	                    '    $DC = [System.DirectoryServices.ActiveDirectory.DomainController]::FindOne($DirectoryCtx,$LocatorOptions)',
+                        '}',
+                        '',
+                        '$ldapDirectoryID = New-Object System.DirectoryServices.Protocols.LdapDirectoryIdentifier $DC.Name, 389, $true, $true',
+                        '$LDAPConnection = New-Object System.DirectoryServices.Protocols.LdapConnection $ldapDirectoryID',
+                        '',
+                        '#Get NamingContexts',
+                        '$LDAPFilter = "(objectclass=*)"',
+                        '$SearchScope = [System.DirectoryServices.Protocols.SearchScope]::Base',
+                        '$SearchRequest = New-Object System.DirectoryServices.Protocols.SearchRequest "",$LDAPFilter,$SearchScope,$null',
+                        '$SearchResponse = $LDAPConnection.SendRequest($SearchRequest)',
+                        '',
+                        '$dNC = $SearchResponse.Entries[0].Attributes["defaultnamingcontext"][0]',
+                        '$cNC = $SearchResponse.Entries[0].Attributes["configurationnamingcontext"][0]',
+                        '',
+                        '$LDAPConnection = New-Object System.DirectoryServices.Protocols.LdapConnection  $DC.Name',
+                        '',
+                        '$TemplatePermissions | ForEach-Object {',
+                        '',
+                        '    $LDAPFilter = "(&(objectclass=pKICertificateTemplate)(cn={0}))" -f $_.Template',
+                        '    $SearchScope = [System.DirectoryServices.Protocols.SearchScope]::SubTree',
+                        '    $SearchRequest = New-Object System.DirectoryServices.Protocols.SearchRequest "CN=Certificate Templates,CN=Public Key Services,CN=Services,$cNC",$LDAPFilter,$SearchScope,$null',
+                        '    $SearchRequest.Attributes.Add("ntSecurityDescriptor")',
+                        '    $SearchRequest.Attributes.Add("distinguishedname")',
+                        '    $SearchResponse = $LDAPConnection.SendRequest($SearchRequest)',
+                        '',
+                        '    #Get ACL Object from BinaryForm',
+                        '    $ntSecurityDescriptor = $SearchResponse.Entries[0].Attributes["ntsecuritydescriptor"][0]',
+                        '    $ACL = New-Object System.Security.AccessControl.CommonSecurityDescriptor "true","true",$ntSecurityDescriptor,0',
+                        '',
+                        '',
+                        '    $accessType = [System.Security.AccessControl.AccessControlType]::Allow',
+                        '    $sid = (Get-ADGroup $_.EnrollGroup).SID',
+                        '    $accessMask = $ADS_RIGHT_READ_CONTROL+$ADS_RIGHT_DS_READ_PROP+$ADS_RIGHT_ACTRL_DS_LIST',
+                        '    $inheritanceFlags = [System.Security.AccessControl.InheritanceFlags]::None',
+                        '    $propagationFlags = [System.Security.AccessControl.PropagationFlags]::None',
+                        '    $objectFlags = [System.Security.AccessControl.ObjectAceFlags]::ObjectAceTypePresent',
+                        '    $objectType = [guid]::Parse("0e10c968-78fb-11d2-90d4-00c04f79dc55")',
+                        '    $inheritedObjectType = [guid]::Parse("00000000-0000-0000-0000-000000000000")',
+                        '',
+                        '    $null = $ACl.DiscretionaryAcl.AddAccess($accessType,$sid,$accessMask,$inheritanceFlags,$propagationFlags)',
+                        '',
+                        '    $accessMask = $ADS_RIGHT_DS_CONTROL_ACCESS',
+                        '',
+                        '    $null = $ACl.DiscretionaryAcl.AddAccess($accessType,$sid,$accessMask,$inheritanceFlags,$propagationFlags,$objectFlags,$objectType,$inheritedObjectType)',
+                        '',
+                        '    if($_.AutoEnrollmentGroup)',
+                        '    {',
+                        '        $objectType = [guid]::Parse("a05b8cc2-17bc-4802-a710-e7c15ab866a2")',
+                        '        $null = $ACl.DiscretionaryAcl.AddAccess($accessType,$sid,$accessMask,$inheritanceFlags,$propagationFlags,$objectFlags,$objectType,$inheritedObjectType)',
+                        '    }',
+                        '    #Get BinaryACL Object from ACL',
+                        '    [byte[]]$BinaryACL = New-Object System.Byte[] $ACL.BinaryLength',
+                        '    $ACL.GetBinaryForm($BinaryACL,0)',
+                        '',
+                        '    #Update ACL',
+                        '    $DN = $SearchResponse.Entries[0].Attributes["distinguishedname"][0]',
+                        '    $Operation = [System.DirectoryServices.Protocols.DirectoryAttributeOperation]::Replace',
+                        '    $Attribute = "ntSecurityDescriptor"',
+                        '    $Value = $BinaryACL',
+                        '    $Request = New-Object System.DirectoryServices.Protocols.ModifyRequest $DN,$Operation,$Attribute,$Value',
+                        '    $null = $LDAPConnection.SendRequest($Request)',
+                        '}'
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "CreateTemplate.txt",
+                    "Content": [
+                        'ldifde -i -f "C:\\Install\\Certificate Templates\\kerberosoid.ldf" -k -c "DomainDN" "<RootDomainDN>" -j C:\\Install -v',
+                        'ldifde -i -f "C:\\Install\\Certificate Templates\\kerberos.ldf" -k -c "DomainDN" "<RootDomainDN>" -j C:\\Install -v',
+                        '',
+                        'ldifde -i -f "C:\\Install\\Certificate Templates\\webserveroid.ldf" -k -c "DomainDN" "<RootDomainDN>" -j C:\\Install -v',
+                        'ldifde -i -f "C:\\Install\\Certificate Templates\\webserver.ldf" -k -c "DomainDN" "<RootDomainDN>" -j C:\\Install -v',
+                        '',
+                        'ldifde -i -f "C:\\Install\\Certificate Templates\\smartcardoid.ldf" -k -c "DomainDN" "<RootDomainDN>" -j C:\\Install -v',
+                        'ldifde -i -f "C:\\Install\\Certificate Templates\\smartcard.ldf" -k -c "DomainDN" "<RootDomainDN>" -j C:\\Install -v'
+                    ]
+                }
+            ],
+            "FilesAndFolders" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Tools",
+                    "Source" : "C:\\HyperV\\Files\\MGMT01",
+                    "Type" : "Directory"
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "Certificate Templates",
+                    "Source" : "C:\\HyperV\\Files\\Certificate Templates",
+                    "Type" : "Directory"
+                }
+            ]
+        },
+        {
+            "Name" : "CA01",
+            "Path": "C:\\HyperV\\ADRES",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016Core.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Write-Host "This will install the certificate authority in ChildDomain"',
+                        'Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and ChildDC01 are configured."',
+                        '',
+                        '$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}',
+                        'New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.23 -PrefixLength 24 -DefaultGateway 10.0.0.254',
+                        'Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")',
+                        '',
+                        '$AdminAccount = "<NBChildDomain>\\Administrator"',
+                        '$SecureString = ConvertTo-SecureString -String "<Password>" -AsPlainText -Force',
+                        '$Cred = [System.Management.Automation.PSCredential]::new($AdminAccount,$SecureString)',
+                        '',
+                        'Add-Computer -DomainName <ChildDomain> -Restart -Credential $Cred',
+                        'Start-Sleep -Seconds 10'
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "capolicy.inf",
+                    "Content": [
+                        '[Version]',
+                        'Signature = "$Windows NT$"',
+                        '[Certsrv_Server]',
+                        'RenewalKeyLength=4096',
+                        'RenewalValidityPeriod="Years"',
+                        'RenewalValidityUnits=5',
+                        'LoadDefaultTemplates = 0',
+                        'AlternateSignatureAlgorithm = 0'
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "ConfigureCertificateAuthority.txt",
+                    "Content": [
+                        'Certutil -setreg CA\\CRLPeriodUnits 2 ',
+                        'Certutil -setreg CA\\CRLPeriod "Weeks" ',
+                        '',
+                        'Certutil -setreg CA\\CRLOverlapUnits 1 ',
+                        'Certutil -setreg CA\\CRLOverlapPeriod "Weeks" ',
+                        '',
+                        'Certutil -setreg CA\\CRLDeltaPeriodUnits 0 ',
+                        'Certutil -setreg CA\\CRLDeltaPeriod "Hours" ',
+                        '',
+                        'certutil -setreg CA\\CRLDeltaOverlapUnits 0',
+                        'certutil -setreg CA\\CRLDeltaOverlapPeriod "Hours"	',
+                        '',
+                        'Certutil -setreg CA\\ValidityPeriodUnits 2 ',
+                        'Certutil -setreg CA\\ValidityPeriod "Years" ',
+                        '',
+                        'Certutil -setreg CA\\AuditFilter 127',
+                        '',
+                        'certutil -setreg CA\\CACertPublicationURLs "1:%windir%\\system32\\CertSrv\\CertEnroll\\%3%4.crt\\n2:http://pki.<ChildDomain>/aia/%3%4.crt"',
+                        'certutil -setreg CA\\CRLPublicationURLs "65:%windir%\\system32\\CertSrv\\CertEnroll\\%3%8%9.crl\\n6:http://pki.<ChildDomain>/crl/%3%8%9.crl"',
+                        '',
+                        'auditpol /set /subcategory:"Certification Services" /success:enable /failure:enable',
+                        '',
+                        'net stop certsvc && net start certsvc',
+                        'certutil –crl'
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "InstallCertificateAuthority.ps1",
+                    "Content": [
+                        'Install-WindowsFeature ADCS-Cert-Authority,RSAT-ADDS-Tools,RSAT-ADCS-Mgmt',
+                        '',
+                        'Copy-Item -Path C:\\install\\capolicy.inf -Destination c:\\Windows\\capolicy.inf',
+                        '',
+                        'Install-AdcsCertificationAuthority `',
+                        '-CACommonName SECURECA01 `',                        '-CAType EnterpriseRootCA `',
+                        '-CryptoProviderName "RSA#Microsoft Software Key Storage Provider" `',
+                        '-HashAlgorithmName SHA512 `',
+                        '-KeyLength 4096 `',
+                        '-ValidityPeriod Years `',
+                        '-ValidityPeriodUnits 5'
+                    ]
+                }
+            ]
+        },
+        {
+            "Name" : "Entra01",
+            "Path": "C:\\HyperV\\ADRES",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016GUI.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Write-Host "This will install the Entra Connect server in ChildDomain"',
+                        'Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and ChildDC01 are configured."',
+                        '',
+                        '$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}',
+                        'New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.24 -PrefixLength 24 -DefaultGateway 10.0.0.254',
+                        'Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")',
+                        '',
+                        '$AdminAccount = "<NBChildDomain>\\Administrator"',
+                        '$SecureString = ConvertTo-SecureString -String "<Password>" -AsPlainText -Force',
+                        '$Cred = [System.Management.Automation.PSCredential]::new($AdminAccount,$SecureString)',
+                        '',
+                        'Add-Computer -DomainName <ChildDomain> -Restart -Credential $Cred',
+                        'Start-Sleep -Seconds 10'
+                    ]
+                }
+            ],
+            "FilesAndFolders" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Tools",
+                    "Source" : "C:\\HyperV\\Files\\ENTRA01",
+                    "Type" : "Directory"
+                }
+            ]
+        },
+        {
+            "Name" : "Client01",
+            "Path": "C:\\HyperV\\ADRES",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\11\\Base11.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\11\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Write-Host "This will install the Windows client in ChildDomain"',
+                        'Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and ChildDC01 are configured."',
+                        '',
+                        '$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}',
+                        'New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.31 -PrefixLength 24 -DefaultGateway 10.0.0.254',
+                        'Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")',
+                        '',
+                        '$AdminAccount = "<NBChildDomain>\\Administrator"',
+                        '$SecureString = ConvertTo-SecureString -String "<Password>" -AsPlainText -Force',
+                        '$Cred = [System.Management.Automation.PSCredential]::new($AdminAccount,$SecureString)',
+                        '',
+                        'Add-Computer -DomainName <ChildDomain> -Restart -Credential $Cred',
+                        'Start-Sleep -Seconds 10'
+                    ]
+                },
+                {
+                    "Path" : "Install",
+                    "Name" : "CreateVirtualSmartCard.txt",
+                    "Content": [
+                        'tpmvscmgr.exe create /name TestVSC /pin default /adminkey random /generate'
+                    ]
+                }
+            ],
+            "FilesAndFolders" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Tools",
+                    "Source" : "C:\\HyperV\\Files\\CLIENT01",
+                    "Type" : "Directory"
+                }
+            ]
+        }
+    ]
+}
