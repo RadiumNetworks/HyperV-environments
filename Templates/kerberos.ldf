@@ -1,9 +1,9 @@
-dn: CN=CorpKerberosAuthentication,CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=Configuration,RootDomain
+dn: CN=CorpKerberosAuthentication,CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=Configuration,DomainDN
 changetype: add
 cn: CorpKerberosAuthentication
 displayName: Corp Kerberos Authentication
 distinguishedName: 
- CN=CorpKerberosAuthentication,CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=Configuration,RootDomain
+ CN=CorpKerberosAuthentication,CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=Configuration,DomainDN
 dSCorePropagationData: 16010101000000.0Z
 flags: 131168
 instanceType: 4
@@ -26,7 +26,7 @@ msPKI-Template-Minor-Revision: 2
 msPKI-Template-Schema-Version: 4
 name: CorpKerberosAuthentication
 objectCategory: 
- CN=PKI-Certificate-Template,CN=Schema,CN=Configuration,RootDomain
+ CN=PKI-Certificate-Template,CN=Schema,CN=Configuration,DomainDN
 objectClass: top
 objectClass: pKICertificateTemplate
 pKICriticalExtensions: 2.5.29.17

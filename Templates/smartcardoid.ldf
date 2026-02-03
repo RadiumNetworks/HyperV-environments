@@ -1,9 +1,9 @@
-dn: CN=9333.ED533726DCC54835A2532CE5BF72BA76,CN=OID,CN=Public Key Services,CN=Services,CN=Configuration,RootDomain
+dn: CN=9333.ED533726DCC54835A2532CE5BF72BA76,CN=OID,CN=Public Key Services,CN=Services,CN=Configuration,DomainDN
 changetype: add
 cn: 9333.ED533726DCC54835A2532CE5BF72BA76
 displayName: Corp Smartcard Logon
 distinguishedName: 
- CN=9333.ED533726DCC54835A2532CE5BF72BA76,CN=OID,CN=Public Key Services,CN=Services,CN=Configuration,RootDomain
+ CN=9333.ED533726DCC54835A2532CE5BF72BA76,CN=OID,CN=Public Key Services,CN=Services,CN=Configuration,DomainDN
 dSCorePropagationData: 16010101000000.0Z
 flags: 1
 instanceType: 4
@@ -11,7 +11,7 @@ msPKI-Cert-Template-OID:
  1.3.6.1.4.1.311.21.8.933066492.3103331710.564709149.3390418038
 name: 9333.ED533726DCC54835A2532CE5BF72BA76
 objectCategory: 
- CN=ms-PKI-Enterprise-Oid,CN=Schema,CN=Configuration,RootDomain
+ CN=ms-PKI-Enterprise-Oid,CN=Schema,CN=Configuration,DomainDN
 objectClass: top
 objectClass: msPKI-Enterprise-Oid
 showInAdvancedViewOnly: TRUE
