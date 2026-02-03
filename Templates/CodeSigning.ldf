@@ -1,0 +1,38 @@
+dn: CN=CorpCodeSigning,CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=Configuration,DomainDN
+changetype: add
+objectClass: top
+objectClass: pKICertificateTemplate
+cn: CorpCodeSigning
+distinguishedName: 
+ CN=CorpCodeSigning,CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=Configuration,DomainDN
+instanceType: 4
+displayName: Corp Code Signing
+showInAdvancedViewOnly: TRUE
+name: CorpCodeSigning
+flags: 131616
+revision: 100
+objectCategory: 
+ CN=PKI-Certificate-Template,CN=Schema,CN=Configuration,DomainDN
+pKIDefaultKeySpec: 2
+pKIKeyUsage:: gAA=
+pKIMaxIssuingDepth: 0
+pKICriticalExtensions: 2.5.29.15
+pKIExpirationPeriod:: AEA5hy7h/v8=
+pKIOverlapPeriod:: AICmCv/e//8=
+pKIExtendedKeyUsage: 1.3.6.1.5.5.7.3.3
+dSCorePropagationData: 16010101000000.0Z
+msPKI-RA-Signature: 0
+msPKI-Enrollment-Flag: 32
+msPKI-Private-Key-Flag: 84213760
+msPKI-Certificate-Name-Flag: -2113929216
+msPKI-Minimal-Key-Size: 2048
+msPKI-Template-Schema-Version: 4
+msPKI-Template-Minor-Revision: 3
+msPKI-Cert-Template-OID: 
+ 1.3.6.1.4.1.311.21.8.2301415314.2511622371.898332249.3266250696
+msPKI-Certificate-Application-Policy: 1.3.6.1.5.5.7.3.3
+msPKI-RA-Application-Policies: 
+ msPKI-Asymmetric-Algorithm`PZPWSTR`RSA`msPKI-Hash-Algorithm`PZPWSTR`SHA256`msP
+ KI-Key-Usage`DWORD`2`msPKI-Symmetric-Algorithm`PZPWSTR`3DES`msPKI-Symmetric-Ke
+ y-Length`DWORD`168`
+

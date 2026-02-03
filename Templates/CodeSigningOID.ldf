@@ -1,0 +1,19 @@
+dn: CN=58920.9EEA2074AA5741F887A2593051BEC64D,CN=OID,CN=Public Key Services,CN=Services,CN=Configuration,DomainDN
+changetype: add
+objectClass: top
+objectClass: msPKI-Enterprise-Oid
+cn: 58920.9EEA2074AA5741F887A2593051BEC64D
+distinguishedName: 
+ CN=58920.9EEA2074AA5741F887A2593051BEC64D,CN=OID,CN=Public Key Services,CN=Services,CN=Configuration,DomainDN
+instanceType: 4
+displayName: Corp Code Signing
+showInAdvancedViewOnly: TRUE
+name: 58920.9EEA2074AA5741F887A2593051BEC64D
+objectGUID:: kTTZ4oJJ50S4RvJERT7FdQ==
+flags: 1
+objectCategory: 
+ CN=ms-PKI-Enterprise-Oid,CN=Schema,CN=Configuration,DomainDN
+dSCorePropagationData: 16010101000000.0Z
+msPKI-Cert-Template-OID: 
+ 1.3.6.1.4.1.311.21.8.2301415314.2511622371.898332249.3266250696
+
