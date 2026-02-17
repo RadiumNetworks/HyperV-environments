@@ -7,7 +7,7 @@
     "VMConfig" : [
         {
             "Name" : "DNS01",
-            "Path": "C:\\HyperV\\ADRES",
+            "Path": "C:\\HyperV\\LAB",
             "Memory" : "2GB",
             "NetworkInterfaces" : ["Intern"],
             "CPUCount" : "2",
@@ -35,7 +35,7 @@
         },
         {
             "Name" : "ROUTER01",
-            "Path": "C:\\HyperV\\ADRES",
+            "Path": "C:\\HyperV\\LAB",
             "Memory" : "2GB",
             "NetworkInterfaces" : ["Intern","Default Switch"],
             "CPUCount" : "2",
@@ -71,7 +71,7 @@
         },
         {
             "Name" : "ROOTDC01",
-            "Path": "C:\\HyperV\\ADRES",
+            "Path": "C:\\HyperV\\LAB",
             "Memory" : "2GB",
             "NetworkInterfaces" : ["Intern"],
             "CPUCount" : "2",
@@ -146,7 +146,7 @@
         },
         {
             "Name" : "ROOTDC02",
-            "Path": "C:\\HyperV\\ADRES",
+            "Path": "C:\\HyperV\\LAB",
             "Memory" : "2GB",
             "NetworkInterfaces" : ["Intern"],
             "CPUCount" : "2",
@@ -204,7 +204,7 @@
         },
         {
             "Name" : "CHILDDC01",
-            "Path": "C:\\HyperV\\ADRES",
+            "Path": "C:\\HyperV\\LAB",
             "Memory" : "2GB",
             "NetworkInterfaces" : ["Intern"],
             "CPUCount" : "2",
@@ -266,7 +266,7 @@
         },
         {
             "Name" : "CHILDDC02",
-            "Path": "C:\\HyperV\\ADRES",
+            "Path": "C:\\HyperV\\LAB",
             "Memory" : "2GB",
             "NetworkInterfaces" : ["Intern"],
             "CPUCount" : "2",
@@ -324,7 +324,7 @@
         },
         {
             "Name" : "DATA01",
-            "Path": "C:\\HyperV\\ADRES",
+            "Path": "C:\\HyperV\\LAB",
             "Memory" : "2GB",
             "NetworkInterfaces" : ["Intern"],
             "CPUCount" : "2",
@@ -399,7 +399,7 @@
         },
         {
             "Name" : "MGMT01",
-            "Path": "C:\\HyperV\\ADRES",
+            "Path": "C:\\HyperV\\LAB",
             "Memory" : "2GB",
             "NetworkInterfaces" : ["Intern"],
             "CPUCount" : "2",
@@ -653,11 +653,11 @@
         },
         {
             "Name" : "CA01",
-            "Path": "C:\\HyperV\\ADRES",
+            "Path": "C:\\HyperV\\LAB",
             "Memory" : "2GB",
             "NetworkInterfaces" : ["Intern"],
             "CPUCount" : "2",
-            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016Core.vhdx",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016GUI.vhdx",
             "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
             "Scripts" : [
                 {
@@ -732,7 +732,8 @@
                         'Copy-Item -Path C:\\install\\capolicy.inf -Destination c:\\Windows\\capolicy.inf',
                         '',
                         'Install-AdcsCertificationAuthority `',
-                        '-CACommonName SECURECA01 `',                        '-CAType EnterpriseRootCA `',
+                        '-CACommonName SECURECA01 `',
+                        '-CAType EnterpriseRootCA `',
                         '-CryptoProviderName "RSA#Microsoft Software Key Storage Provider" `',
                         '-HashAlgorithmName SHA512 `',
                         '-KeyLength 4096 `',
@@ -744,7 +745,7 @@
         },
         {
             "Name" : "Entra01",
-            "Path": "C:\\HyperV\\ADRES",
+            "Path": "C:\\HyperV\\LAB",
             "Memory" : "2GB",
             "NetworkInterfaces" : ["Intern"],
             "CPUCount" : "2",
@@ -782,7 +783,7 @@
         },
         {
             "Name" : "Client01",
-            "Path": "C:\\HyperV\\ADRES",
+            "Path": "C:\\HyperV\\LAB",
             "Memory" : "2GB",
             "NetworkInterfaces" : ["Intern"],
             "CPUCount" : "2",
@@ -821,6 +822,44 @@
                     "Path" : "Install",
                     "Name" : "Tools",
                     "Source" : "C:\\HyperV\\Files\\CLIENT01",
+                    "Type" : "Directory"
+                }
+            ]
+        },
+        {
+            "Name" : "NDES01",
+            "Path": "C:\\HyperV\\LAB",
+            "Memory" : "2GB",
+            "NetworkInterfaces" : ["Intern"],
+            "CPUCount" : "2",
+            "BaseDisc" : "C:\\HyperV\\BaseDiscs\\2016\\Base2016GUI.vhdx",
+            "unattend" : "C:\\HyperV\\BaseDiscs\\2016\\unattend.xml",
+            "Scripts" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Setup.ps1",
+                    "Content": [
+                        'Write-Host "This will install the Entra Connect server in ChildDomain"',
+                        'Read-Host -Prompt "Press Enter to continue only after the DNS Server, ROOTDC01 and ChildDC01 are configured."',
+                        '',
+                        '$Adapter = Get-NetAdapter -Physical | Where-Object {$_.Status -eq "Up"}',
+                        'New-NetIPAddress -InterfaceAlias $Adapter.Name -IPAddress 10.0.0.25 -PrefixLength 24 -DefaultGateway 10.0.0.254',
+                        'Set-DnsClientServerAddress -InterfaceAlias $Adapter.Name -ServerAddresses ("10.0.0.253")',
+                        '',
+                        '$AdminAccount = "<NBChildDomain>\\Administrator"',
+                        '$SecureString = ConvertTo-SecureString -String "<Password>" -AsPlainText -Force',
+                        '$Cred = [System.Management.Automation.PSCredential]::new($AdminAccount,$SecureString)',
+                        '',
+                        'Add-Computer -DomainName <ChildDomain> -Restart -Credential $Cred',
+                        'Start-Sleep -Seconds 10'
+                    ]
+                }
+            ],
+            "FilesAndFolders" : [
+                {
+                    "Path" : "Install",
+                    "Name" : "Tools",
+                    "Source" : "C:\\HyperV\\Files\\NDES01",
                     "Type" : "Directory"
                 }
             ]

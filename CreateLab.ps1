@@ -1,4 +1,4 @@
-﻿#$Cred = Get-Credential -Message "Please enter a password for the administrator accounts" -UserName "Administrator"$Password = $Cred.GetNetworkCredential().Passwordif(!($HostGuard = Get-HgsGuardian -Name VMGuardian))
+﻿$Cred = Get-Credential -Message "Please enter a password for the administrator accounts" -UserName "Administrator"$Password = $Cred.GetNetworkCredential().Passwordif(!($HostGuard = Get-HgsGuardian -Name VMGuardian))
 {
     $HostGuard = New-HgsGuardian -Name 'VMGuardian' -GenerateCertificates
 }
